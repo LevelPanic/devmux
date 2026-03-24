@@ -1,5 +1,5 @@
 {
-  "name": "devmux",
+  "name": "devmux-cli",
   "version": "0.2.0",
   "description": "Run multiple dev sessions across git worktrees — zero config, auto-detects everything",
   "type": "module",

@@ -7,13 +7,13 @@ Works with any dev server that reads a `PORT` environment variable — Next.js, 
 ## Install
 
 ```bash
-npm install -g devmux
+npm install -g devmux-cli
 ```
 
 Or run without installing:
 
 ```bash
-npx devmux up feature-branch
+npx devmux-cli up feature-branch
 ```
 
 ## Quick Start
