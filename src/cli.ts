@@ -68,6 +68,15 @@ program
   });
 
 program
+  .command('show')
+  .description('Stream all session logs in one terminal (like pnpm/concurrently)')
+  .option('-a, --all', 'Show sessions from all projects')
+  .action(async (opts) => {
+    const { show } = await import('./commands/show.js');
+    await show(opts);
+  });
+
+program
   .command('restart <session>')
   .description('Stop and restart a session (preserves branch, dir, env)')
   .option('-p, --port <port>', 'Change the port on restart')
