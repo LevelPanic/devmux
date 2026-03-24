@@ -230,11 +230,13 @@ export async function show(opts: ShowOptions): Promise<void> {
     }
   }
 
-  /** Scan registry for new/removed sessions */
+  /** Scan registry for new/removed sessions — only renders if something changed */
   function refreshSessions(): void {
     const sessions = projectRoot
       ? getSessionsByProject(projectRoot)
       : getSessions();
+
+    let changed = false;
 
     for (const session of sessions) {
       if (!tracked.has(session.id)) {
@@ -249,6 +251,7 @@ export async function show(opts: ShowOptions): Promise<void> {
 
         tracked.set(session.id, ts);
         sessionOrder.push(session.id);
+        changed = true;
 
         appendSystemLine(session.id, `${green(symbols.tick)} started (port ${cyan(String(session.port))})`);
         tailSession(ts).catch(() => {});
@@ -261,11 +264,12 @@ export async function show(opts: ShowOptions): Promise<void> {
       const wasAlive = ts.alive;
       ts.alive = activeIds.has(id) && isProcessAlive(ts.session.pid);
       if (wasAlive && !ts.alive) {
+        changed = true;
         appendSystemLine(id, `${red(symbols.cross)} exited`);
       }
     }
 
-    render();
+    if (changed) render();
   }
 
   let statusMessage = '';
@@ -358,13 +362,9 @@ export async function show(opts: ShowOptions): Promise<void> {
     process.stdin.on('data', onKey);
   }
 
-  // Initial scan
+  // Initial scan + render once
   refreshSessions();
-
-  if (tracked.size === 0) {
-    appendLine('devmux', `${dim('No active sessions. Waiting...')}`);
-    // Create a fake entry for system messages
-  }
+  render();
 
   // Poll registry
   const registryPoll = setInterval(refreshSessions, 3000);
