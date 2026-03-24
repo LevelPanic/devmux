@@ -72,6 +72,8 @@ program
   .description('Stop and restart a session (preserves branch, dir, env)')
   .option('-p, --port <port>', 'Change the port on restart')
   .option('-c, --command <cmd>', 'Change the command on restart')
+  .option('-e, --env <KEY=VALUE...>', 'Override or add env vars (merges with existing)', (v, prev: string[]) => [...prev, v], [])
+  .option('--clear-env', 'Clear all existing env vars before applying --env')
   .action(async (session, opts) => {
     const { restart } = await import('./commands/restart.js');
     await restart(session, opts);
