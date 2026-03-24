@@ -224,6 +224,29 @@ Add `.devmux.json` to your `.gitignore` if port assignments are machine-specific
 - **Any package manager** — auto-detects pnpm, npm, yarn, and bun
 - **Monorepos** — detects workspace roots and uses the correct install/dev commands
 
+## How devmux Compares
+
+There are tools that manage worktrees and tools that run parallel scripts — but nothing combines both with dev server lifecycle management.
+
+| Tool | Worktrees | Dev servers | Port management | Dashboard | Auto-detect |
+|------|:---------:|:-----------:|:---------------:|:---------:|:-----------:|
+| **devmux** | ✔ | ✔ | ✔ | ✔ | ✔ |
+| [Worktrunk](https://github.com/max-sixty/worktrunk) | ✔ | — | — | — | — |
+| [git-worktree-runner](https://github.com/coderabbitai/git-worktree-runner) | ✔ | — | — | — | Partial |
+| [gwq](https://github.com/d-kuro/gwq) | ✔ | — | — | — | — |
+| [concurrently](https://www.npmjs.com/package/concurrently) | — | ✔ | — | — | — |
+| [npm-run-all](https://github.com/mysticatea/npm-run-all) | — | ✔ | — | — | — |
+
+**Worktree managers** (Worktrunk, gwq, wtp, git-worktree-runner) handle creating and switching worktrees but don't manage running processes, assign ports, or track session state.
+
+**Parallel runners** (concurrently, npm-run-all) run multiple scripts at once but have no worktree awareness, no port allocation, and no session persistence — if your terminal closes, everything dies.
+
+devmux bridges the gap: worktree creation, dependency installation, background process management, port allocation, session registry, log tailing, and a web dashboard — all in one command.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
 ## License
 
 [MIT](LICENSE)
