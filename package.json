@@ -14,16 +14,32 @@
   },
   "files": [
     "dist",
-    "bin"
+    "bin",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
   ],
   "keywords": [
     "nextjs",
+    "next",
     "dev",
     "worktree",
+    "git-worktree",
     "multiplexer",
     "parallel",
-    "development"
+    "development",
+    "devserver",
+    "cli"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LevelPanic/devmux.git"
+  },
+  "homepage": "https://github.com/LevelPanic/devmux#readme",
+  "bugs": {
+    "url": "https://github.com/LevelPanic/devmux/issues"
+  },
+  "author": "LevelPanic",
   "license": "MIT",
   "engines": {
     "node": ">=18"

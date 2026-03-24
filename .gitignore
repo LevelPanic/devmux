@@ -1,2 +1,21 @@
-node_modules
-dist
+# Build output
+dist/
+
+# Dependencies
+node_modules/
+
+# devmux's own config (when developing devmux itself)
+.devmux.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# npm
+*.tgz
