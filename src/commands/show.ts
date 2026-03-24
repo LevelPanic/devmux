@@ -5,13 +5,12 @@ import { execSync } from 'node:child_process';
 import { getSessionsByProject, getSessions, isProcessAlive, type Session } from '../lib/registry.js';
 import { findProjectRoot } from '../lib/config.js';
 import { logFilePath } from '../lib/paths.js';
-import { bold, green, red, cyan, dim, yellow, gray, symbols } from '../lib/colors.js';
+import { bold, green, red, cyan, dim, yellow, symbols } from '../lib/colors.js';
 
 interface ShowOptions {
   all?: boolean;
 }
 
-// Colors for session tabs
 const tabColors = [cyan, green, yellow, red, bold];
 
 interface TrackedSession {
@@ -19,22 +18,20 @@ interface TrackedSession {
   position: number;
   color: (s: string) => string;
   alive: boolean;
-  /** Buffered log lines for this session */
-  lines: string[];
+  lines: string[]; // raw log lines (no prefix)
 }
 
-const MAX_BUFFER_LINES = 5000;
+const MAX_LINES = 5000;
 
-/** ANSI helpers */
-const ansi = {
-  clearScreen: '\x1b[2J\x1b[H',
-  clearLine: '\x1b[2K',
-  moveTo: (row: number, col: number) => `\x1b[${row};${col}H`,
-  savePos: '\x1b[s',
-  restorePos: '\x1b[u',
+const esc = {
+  clear: '\x1b[2J\x1b[H',
   hideCursor: '\x1b[?25l',
   showCursor: '\x1b[?25h',
+  moveTo: (r: number, c: number) => `\x1b[${r};${c}H`,
+  clearLine: '\x1b[2K',
   inverse: (s: string) => `\x1b[7m${s}\x1b[27m`,
+  // Clear from cursor to end of line
+  clearToEOL: '\x1b[K',
 };
 
 export async function show(opts: ShowOptions): Promise<void> {
@@ -42,148 +39,218 @@ export async function show(opts: ShowOptions): Promise<void> {
   const ac = new AbortController();
 
   const tracked = new Map<string, TrackedSession>();
-  const sessionOrder: string[] = []; // ordered list of session IDs
+  const sessionOrder: string[] = [];
   let colorIndex = 0;
-  let activeTab = 0; // 0 = "All", 1+ = individual sessions
+  let selectedIndex = 0;
+  let scrollOffset = 0; // how many lines scrolled up from bottom
+  let statusMessage = '';
+  let statusTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function getColor(): (s: string) => string {
-    const color = tabColors[colorIndex % tabColors.length];
+    const c = tabColors[colorIndex % tabColors.length];
     colorIndex++;
-    return color;
+    return c;
   }
 
-  /** Get terminal dimensions */
-  function getSize(): { rows: number; cols: number } {
-    return {
-      rows: process.stdout.rows || 40,
-      cols: process.stdout.columns || 120,
-    };
+  function cols(): number { return process.stdout.columns || 120; }
+  function rows(): number { return process.stdout.rows || 40; }
+
+  // Layout constants
+  const SIDEBAR_WIDTH = () => {
+    const maxName = Math.max(12, ...sessionOrder.map((id) => id.length));
+    return Math.min(maxName + 6, 30); // pad + status dot + border
+  };
+  const HEADER_ROWS = 1; // "Tasks" / "Logs" header
+  const FOOTER_ROWS = 2; // keybinds
+
+  /** Get the selected session */
+  function selectedSession(): TrackedSession | undefined {
+    const id = sessionOrder[selectedIndex];
+    return id ? tracked.get(id) : undefined;
   }
 
-  /** Build the tab bar string */
-  function renderTabBar(): string {
-    const { cols } = getSize();
-    const tabs: string[] = [];
+  /** Draw the full screen */
+  function render(): void {
+    const c = cols();
+    const r = rows();
+    const sw = SIDEBAR_WIDTH();
+    const logWidth = c - sw - 1; // -1 for border
+    const contentRows = r - HEADER_ROWS - FOOTER_ROWS;
 
-    // "All" tab
-    if (activeTab === 0) {
-      tabs.push(ansi.inverse(bold(' All ')));
-    } else {
-      tabs.push(dim(' All '));
-    }
+    process.stdout.write(esc.hideCursor);
+    process.stdout.write(esc.clear);
 
-    // Session tabs
-    for (let i = 0; i < sessionOrder.length; i++) {
-      const id = sessionOrder[i];
-      const ts = tracked.get(id)!;
-      const status = ts.alive ? green(symbols.bullet) : red(symbols.bullet);
-      const port = dim(`:${ts.session.port}`);
-      const label = ` ${ts.color(id)}${port} ${status} `;
+    // === Header row ===
+    const taskHeader = bold(' Tasks');
+    const selected = selectedSession();
+    const logHeader = selected
+      ? ` ${selected.color(selected.session.id)} ${dim(`:${selected.session.port}`)}`
+      : dim(' No session selected');
+    process.stdout.write(esc.moveTo(1, 1));
+    process.stdout.write(taskHeader.padEnd(sw) + dim('│') + logHeader + esc.clearToEOL);
 
-      if (activeTab === i + 1) {
-        tabs.push(ansi.inverse(label));
-      } else {
-        tabs.push(label);
-      }
-    }
+    // === Sidebar + Log pane ===
+    for (let row = 0; row < contentRows; row++) {
+      const screenRow = row + HEADER_ROWS + 1;
+      process.stdout.write(esc.moveTo(screenRow, 1));
 
-    const bar = tabs.join(dim(' │ '));
-    const hint = dim(' ← → switch │ c copy │ Ctrl+C exit');
-    return `${bar}${hint}`;
-  }
-
-  /** Get the lines to display based on active tab */
-  function getVisibleLines(): string[] {
-    if (activeTab === 0) {
-      // All sessions interleaved — collect from all and sort isn't practical,
-      // so we just show all lines tagged with prefixes
-      const all: string[] = [];
-      for (const id of sessionOrder) {
+      // Sidebar
+      if (row < sessionOrder.length) {
+        const id = sessionOrder[row];
         const ts = tracked.get(id)!;
-        for (const line of ts.lines) {
-          all.push(line);
+        const isSelected = row === selectedIndex;
+        const status = ts.alive ? green(symbols.bullet) : red(symbols.bullet);
+        const marker = isSelected ? bold('»') : ' ';
+        const name = ts.color(id);
+        let cell = ` ${status} ${marker} ${name}`;
+
+        if (isSelected) {
+          // Highlight the row
+          cell = esc.inverse(cell.padEnd(sw));
+        } else {
+          cell = cell.padEnd(sw);
+        }
+        process.stdout.write(cell);
+      } else {
+        process.stdout.write(' '.repeat(sw));
+      }
+
+      // Border
+      process.stdout.write(dim('│'));
+
+      // Log line
+      if (selected) {
+        const totalLines = selected.lines.length;
+        const visibleStart = Math.max(0, totalLines - contentRows - scrollOffset);
+        const lineIdx = visibleStart + row;
+        if (lineIdx >= 0 && lineIdx < totalLines) {
+          const line = selected.lines[lineIdx];
+          // Truncate to fit
+          process.stdout.write(' ' + line.slice(0, logWidth - 1));
         }
       }
-      return all;
+
+      process.stdout.write(esc.clearToEOL);
     }
 
-    // Single session
-    const id = sessionOrder[activeTab - 1];
-    if (!id) return [];
-    const ts = tracked.get(id);
-    if (!ts) return [];
-    return ts.lines;
-  }
+    // === Footer ===
+    const footerRow = r - FOOTER_ROWS + 1;
+    process.stdout.write(esc.moveTo(footerRow, 1));
+    process.stdout.write(dim('─'.repeat(c)));
 
-  /** Full redraw */
-  function render(): void {
-    const { rows, cols } = getSize();
-    const tabBar = renderTabBar();
+    process.stdout.write(esc.moveTo(footerRow + 1, 1));
+    const keybinds = `  ${bold('↑↓')} Select   ${bold('c')} Copy logs   ${bold('Ctrl+C')} Exit`;
+    const scrollInfo = selected && selected.lines.length > contentRows
+      ? dim(`  ${selected.lines.length} lines`)
+      : '';
 
-    // Reserve: 1 tab bar, 1 separator, 1 status bar at bottom
-    const hasStatus = statusMessage.length > 0;
-    const logRows = rows - 2 - (hasStatus ? 1 : 0);
-    const visible = getVisibleLines();
-    const displayLines = visible.slice(-logRows);
-
-    process.stdout.write(ansi.hideCursor);
-    process.stdout.write(ansi.clearScreen);
-
-    // Tab bar at top
-    process.stdout.write(tabBar + '\n');
-    process.stdout.write(dim('─'.repeat(Math.min(cols, 120))) + '\n');
-
-    // Log lines
-    for (const line of displayLines) {
-      process.stdout.write(line + '\n');
-    }
-
-    // Status bar at bottom
-    if (hasStatus) {
-      process.stdout.write(ansi.moveTo(rows, 1) + ansi.clearLine + statusMessage);
+    if (statusMessage) {
+      process.stdout.write(statusMessage + esc.clearToEOL);
+    } else {
+      process.stdout.write(keybinds + scrollInfo + esc.clearToEOL);
     }
   }
 
-  /** Append a line for a session and re-render if visible */
+  /** Only redraw the log pane (right side) — faster than full render */
+  function renderLogPane(): void {
+    const c = cols();
+    const r = rows();
+    const sw = SIDEBAR_WIDTH();
+    const logWidth = c - sw - 1;
+    const contentRows = r - HEADER_ROWS - FOOTER_ROWS;
+    const selected = selectedSession();
+
+    // Update header with selected session name
+    process.stdout.write(esc.moveTo(1, sw + 2));
+    if (selected) {
+      process.stdout.write(` ${selected.color(selected.session.id)} ${dim(`:${selected.session.port}`)}` + esc.clearToEOL);
+    } else {
+      process.stdout.write(dim(' No session selected') + esc.clearToEOL);
+    }
+
+    for (let row = 0; row < contentRows; row++) {
+      const screenRow = row + HEADER_ROWS + 1;
+      // Move past sidebar + border
+      process.stdout.write(esc.moveTo(screenRow, sw + 2));
+
+      if (selected) {
+        const totalLines = selected.lines.length;
+        const visibleStart = Math.max(0, totalLines - contentRows - scrollOffset);
+        const lineIdx = visibleStart + row;
+        if (lineIdx >= 0 && lineIdx < totalLines) {
+          process.stdout.write(' ' + selected.lines[lineIdx].slice(0, logWidth - 1));
+        }
+      }
+
+      process.stdout.write(esc.clearToEOL);
+    }
+  }
+
+  /** Update just the sidebar selection highlight */
+  function renderSidebar(): void {
+    const r = rows();
+    const sw = SIDEBAR_WIDTH();
+    const contentRows = r - HEADER_ROWS - FOOTER_ROWS;
+
+    for (let row = 0; row < Math.min(contentRows, sessionOrder.length); row++) {
+      const screenRow = row + HEADER_ROWS + 1;
+      const id = sessionOrder[row];
+      const ts = tracked.get(id)!;
+      const isSelected = row === selectedIndex;
+      const status = ts.alive ? green(symbols.bullet) : red(symbols.bullet);
+      const marker = isSelected ? bold('»') : ' ';
+      const name = ts.color(id);
+      let cell = ` ${status} ${marker} ${name}`;
+
+      process.stdout.write(esc.moveTo(screenRow, 1));
+      if (isSelected) {
+        process.stdout.write(esc.inverse(cell.padEnd(sw)));
+      } else {
+        process.stdout.write(cell.padEnd(sw));
+      }
+    }
+  }
+
+  function showStatus(msg: string, durationMs: number = 3000): void {
+    statusMessage = msg;
+    if (statusTimeout) clearTimeout(statusTimeout);
+    statusTimeout = setTimeout(() => {
+      statusMessage = '';
+      // Redraw footer
+      const r = rows();
+      process.stdout.write(esc.moveTo(r, 1));
+      process.stdout.write(`  ${bold('↑↓')} Select   ${bold('c')} Copy logs   ${bold('Ctrl+C')} Exit` + esc.clearToEOL);
+    }, durationMs);
+    // Show status in footer
+    const r = rows();
+    process.stdout.write(esc.moveTo(r, 1));
+    process.stdout.write(msg + esc.clearToEOL);
+  }
+
+  /** Append a log line for a session */
   function appendLine(sessionId: string, rawLine: string): void {
     const ts = tracked.get(sessionId);
     if (!ts) return;
 
-    const maxLen = Math.max(...sessionOrder.map((id) => id.length), 3);
-    const padded = sessionId.padEnd(maxLen);
-    const prefix = ts.color(`[${padded}]`);
-    const tagged = `${prefix} ${rawLine}`;
-
-    // Store both tagged (for "All" view) and raw
-    ts.lines.push(tagged);
-    if (ts.lines.length > MAX_BUFFER_LINES) {
-      ts.lines.splice(0, ts.lines.length - MAX_BUFFER_LINES);
+    ts.lines.push(rawLine);
+    if (ts.lines.length > MAX_LINES) {
+      ts.lines.splice(0, ts.lines.length - MAX_LINES);
     }
 
-    // Only re-render if this session is visible
-    const isVisible = activeTab === 0 || sessionOrder[activeTab - 1] === sessionId;
-    if (isVisible) {
-      render();
+    // Only update log pane if this is the selected session and we're at the bottom
+    if (sessionOrder[selectedIndex] === sessionId && scrollOffset === 0) {
+      renderLogPane();
     }
   }
 
-  /** Append a system message for a session */
   function appendSystemLine(sessionId: string, msg: string): void {
-    const ts = tracked.get(sessionId);
-    if (!ts) return;
-
-    const maxLen = Math.max(...sessionOrder.map((id) => id.length), 3);
-    const padded = sessionId.padEnd(maxLen);
-    const prefix = ts.color(`[${padded}]`);
-    ts.lines.push(`${prefix} ${dim(msg)}`);
-    render();
+    appendLine(sessionId, dim(msg));
   }
 
-  /** Start tailing a session's log file */
+  /** Tail a session's log file */
   async function tailSession(ts: TrackedSession): Promise<void> {
     const logFile = logFilePath(ts.session.id);
 
-    // Wait for log file
     let waitCount = 0;
     while (!existsSync(logFile) && waitCount < 60) {
       await new Promise((r) => setTimeout(r, 500));
@@ -192,15 +259,13 @@ export async function show(opts: ShowOptions): Promise<void> {
     }
     if (!existsSync(logFile)) return;
 
-    // Print last few lines for context
     const content = readFileSync(logFile, 'utf-8');
     const lines = content.split('\n').filter((l) => l.length > 0);
-    for (const line of lines.slice(-20)) {
+    for (const line of lines.slice(-50)) {
       appendLine(ts.session.id, line);
     }
     ts.position = Buffer.byteLength(content, 'utf-8');
 
-    // Watch for new content
     try {
       const watcher = watch(logFile, { signal: ac.signal });
       for await (const _ of watcher) {
@@ -210,8 +275,7 @@ export async function show(opts: ShowOptions): Promise<void> {
           if (stat.size > ts.position) {
             const buf = Buffer.alloc(stat.size - ts.position);
             await fh.read(buf, 0, buf.length, ts.position);
-            const newLines = buf.toString('utf-8').split('\n');
-            for (const line of newLines) {
+            for (const line of buf.toString('utf-8').split('\n')) {
               if (line.length === 0) continue;
               appendLine(ts.session.id, line);
             }
@@ -230,7 +294,7 @@ export async function show(opts: ShowOptions): Promise<void> {
     }
   }
 
-  /** Scan registry for new/removed sessions — only renders if something changed */
+  /** Scan registry — only re-render if something changed */
   function refreshSessions(): void {
     const sessions = projectRoot
       ? getSessionsByProject(projectRoot)
@@ -258,7 +322,6 @@ export async function show(opts: ShowOptions): Promise<void> {
       }
     }
 
-    // Check for dead sessions
     const activeIds = new Set(sessions.map((s) => s.id));
     for (const [id, ts] of tracked) {
       const wasAlive = ts.alive;
@@ -272,72 +335,61 @@ export async function show(opts: ShowOptions): Promise<void> {
     if (changed) render();
   }
 
-  let statusMessage = '';
-  let statusTimeout: ReturnType<typeof setTimeout> | null = null;
-
-  function showStatus(msg: string, durationMs: number = 3000): void {
-    statusMessage = msg;
-    if (statusTimeout) clearTimeout(statusTimeout);
-    statusTimeout = setTimeout(() => {
-      statusMessage = '';
-      render();
-    }, durationMs);
-    render();
-  }
-
-  /** Copy visible logs to clipboard using OSC 52 (works in most modern terminals) */
   function copyToClipboard(): void {
-    const lines = getVisibleLines();
-    // Strip ANSI codes for clean clipboard content
-    const clean = lines
+    const selected = selectedSession();
+    if (!selected) return;
+
+    const clean = selected.lines
       .map((l) => l.replace(/\x1b\[[0-9;]*m/g, ''))
       .join('\n');
 
-    // OSC 52 — terminal clipboard escape sequence (works in iTerm2, kitty, tmux, etc.)
+    // OSC 52
     const b64 = Buffer.from(clean).toString('base64');
     process.stdout.write(`\x1b]52;c;${b64}\x07`);
 
-    // Also try pbcopy (macOS) / xclip (Linux) as fallback
+    // pbcopy / xclip fallback
     try {
       execSync('pbcopy', { input: clean, stdio: ['pipe', 'ignore', 'ignore'] });
     } catch {
       try {
         execSync('xclip -selection clipboard', { input: clean, stdio: ['pipe', 'ignore', 'ignore'] });
       } catch {
-        // Neither available — OSC 52 is the primary method
+        // OSC 52 only
       }
     }
 
-    const label = activeTab === 0 ? 'all' : sessionOrder[activeTab - 1];
-    showStatus(`${green(symbols.tick)} Copied ${lines.length} lines from [${label}]`);
+    showStatus(`  ${green(symbols.tick)} Copied ${selected.lines.length} lines from ${bold(selected.session.id)}`);
   }
 
-  /** Handle keypress */
   function onKey(key: Buffer): void {
     const seq = key.toString();
-    const totalTabs = sessionOrder.length + 1;
 
     // Ctrl+C
-    if (seq === '\x03') {
-      cleanup();
+    if (seq === '\x03') { cleanup(); return; }
+
+    // Up arrow
+    if (seq === '\x1b[A') {
+      if (sessionOrder.length > 0) {
+        selectedIndex = (selectedIndex - 1 + sessionOrder.length) % sessionOrder.length;
+        scrollOffset = 0;
+        renderSidebar();
+        renderLogPane();
+      }
       return;
     }
 
-    // Right arrow or Tab
-    if (seq === '\x1b[C' || seq === '\t') {
-      activeTab = (activeTab + 1) % totalTabs;
-      render();
+    // Down arrow
+    if (seq === '\x1b[B') {
+      if (sessionOrder.length > 0) {
+        selectedIndex = (selectedIndex + 1) % sessionOrder.length;
+        scrollOffset = 0;
+        renderSidebar();
+        renderLogPane();
+      }
       return;
     }
 
-    // Left arrow or Shift+Tab
-    if (seq === '\x1b[D' || seq === '\x1b[Z') {
-      activeTab = (activeTab - 1 + totalTabs) % totalTabs;
-      render();
-      return;
-    }
-
-    // c = copy visible logs
+    // c = copy
     if (seq === 'c' || seq === 'C') {
       copyToClipboard();
       return;
@@ -347,35 +399,29 @@ export async function show(opts: ShowOptions): Promise<void> {
   function cleanup(): void {
     clearInterval(registryPoll);
     ac.abort();
-    process.stdout.write(ansi.showCursor);
+    process.stdout.write(esc.showCursor);
+    process.stdout.write(esc.clear);
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(false);
     }
-    console.log(`\n${dim('Detached from all sessions (still running)')}`);
+    console.log(dim('Detached from all sessions (still running)'));
     process.exit(0);
   }
 
-  // Setup raw mode for keypresses
+  // Setup
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.on('data', onKey);
   }
 
-  // Initial scan + render once
   refreshSessions();
   render();
 
-  // Poll registry
   const registryPoll = setInterval(refreshSessions, 3000);
-
-  // Re-render on terminal resize
   process.stdout.on('resize', render);
-
-  // Handle signals
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
 
-  // Keep alive
   await new Promise(() => {});
 }
