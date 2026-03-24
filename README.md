@@ -92,12 +92,26 @@ After starting, devmux waits for the server to accept connections and shows a re
 
 ### `devmux restart <session>`
 
-Stop and restart a session, preserving its branch, directory, and environment.
+Stop and restart a session, preserving its branch, directory, and environment. Supports env swapping on the fly.
 
 ```bash
-devmux restart feature-x             # Same port, same config
-devmux restart feature-x --port 3005 # Change port on restart
-devmux restart feature-x -c "new cmd" # Change command on restart
+devmux restart feature-x                              # Same port, same config
+devmux restart feature-x --port 3005                   # Change port on restart
+devmux restart feature-x -c "new cmd"                  # Change command on restart
+devmux restart feature-x -e API_URL=http://localhost:4001  # Swap an env var
+devmux restart feature-x --clear-env -e API_URL=...    # Wipe all env, start fresh
+```
+
+| Flag | Description |
+|------|-------------|
+| `-p, --port <port>` | Change the port |
+| `-c, --command <cmd>` | Change the command |
+| `-e, --env <K=V>` | Override or add env vars (merges with existing, repeatable) |
+| `--clear-env` | Clear all existing env vars before applying `--env` |
+
+When env vars change, devmux shows a diff:
+```
+→ API_URL: http://localhost:4000 → http://localhost:4001
 ```
 
 ### `devmux attach <session>`
@@ -256,6 +270,27 @@ You can customize services in `.devmux.json`:
 | `port` | Default port (used before auto-assignment) |
 | `env` | Extra env vars for this service |
 
+### Multi-Service Example: Frontends + Backends
+
+Run 3 frontends and 2 backends, then switch which backend a frontend talks to:
+
+```bash
+# Start backends
+devmux up main --service api --port 4000
+devmux up main --service api-v2 --port 4001
+
+# Start frontends, all pointing at api
+devmux up main --service dashboard --port 3000 -e API_URL=http://localhost:4000
+devmux up main --service admin --port 3001 -e API_URL=http://localhost:4000
+devmux up main --service mobile-web --port 3002 -e API_URL=http://localhost:4000
+
+# Switch mobile-web to api-v2
+devmux restart main:mobile-web -e API_URL=http://localhost:4001
+
+# Check everything
+devmux ls
+```
+
 ## Port Management
 
 Ports are automatically managed:
@@ -286,6 +321,25 @@ Pass additional variables with `-e`:
 
 ```bash
 devmux up feature-x -e API_URL=http://localhost:8080 -e DEBUG=true
+```
+
+### Swapping Env Vars at Runtime
+
+Use `devmux restart` with `-e` to change env vars without tearing down the session:
+
+```bash
+# Frontend starts pointing at backend-1
+devmux up main --service frontend --port 3000 -e API_URL=http://localhost:4000
+
+# Switch to backend-2
+devmux restart main:frontend -e API_URL=http://localhost:4001
+# Shows: API_URL: http://localhost:4000 → http://localhost:4001
+
+# Add a new var without touching existing ones
+devmux restart main:frontend -e DEBUG=true
+
+# Wipe everything and start clean
+devmux restart main:frontend --clear-env -e API_URL=http://localhost:4000
 ```
 
 ## Where State Lives
