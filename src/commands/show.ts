@@ -1,6 +1,7 @@
 import { watch } from 'node:fs/promises';
 import { open } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { getSessionsByProject, getSessions, isProcessAlive, type Session } from '../lib/registry.js';
 import { findProjectRoot } from '../lib/config.js';
 import { logFilePath } from '../lib/paths.js';
@@ -87,7 +88,7 @@ export async function show(opts: ShowOptions): Promise<void> {
     }
 
     const bar = tabs.join(dim(' │ '));
-    const hint = dim(' ← → switch │ Ctrl+C exit');
+    const hint = dim(' ← → switch │ c copy │ Ctrl+C exit');
     return `${bar}${hint}`;
   }
 
@@ -119,8 +120,9 @@ export async function show(opts: ShowOptions): Promise<void> {
     const { rows, cols } = getSize();
     const tabBar = renderTabBar();
 
-    // Reserve: 1 row for tab bar, 1 for blank line
-    const logRows = rows - 2;
+    // Reserve: 1 tab bar, 1 separator, 1 status bar at bottom
+    const hasStatus = statusMessage.length > 0;
+    const logRows = rows - 2 - (hasStatus ? 1 : 0);
     const visible = getVisibleLines();
     const displayLines = visible.slice(-logRows);
 
@@ -134,6 +136,11 @@ export async function show(opts: ShowOptions): Promise<void> {
     // Log lines
     for (const line of displayLines) {
       process.stdout.write(line + '\n');
+    }
+
+    // Status bar at bottom
+    if (hasStatus) {
+      process.stdout.write(ansi.moveTo(rows, 1) + ansi.clearLine + statusMessage);
     }
   }
 
@@ -261,10 +268,50 @@ export async function show(opts: ShowOptions): Promise<void> {
     render();
   }
 
+  let statusMessage = '';
+  let statusTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function showStatus(msg: string, durationMs: number = 3000): void {
+    statusMessage = msg;
+    if (statusTimeout) clearTimeout(statusTimeout);
+    statusTimeout = setTimeout(() => {
+      statusMessage = '';
+      render();
+    }, durationMs);
+    render();
+  }
+
+  /** Copy visible logs to clipboard using OSC 52 (works in most modern terminals) */
+  function copyToClipboard(): void {
+    const lines = getVisibleLines();
+    // Strip ANSI codes for clean clipboard content
+    const clean = lines
+      .map((l) => l.replace(/\x1b\[[0-9;]*m/g, ''))
+      .join('\n');
+
+    // OSC 52 — terminal clipboard escape sequence (works in iTerm2, kitty, tmux, etc.)
+    const b64 = Buffer.from(clean).toString('base64');
+    process.stdout.write(`\x1b]52;c;${b64}\x07`);
+
+    // Also try pbcopy (macOS) / xclip (Linux) as fallback
+    try {
+      execSync('pbcopy', { input: clean, stdio: ['pipe', 'ignore', 'ignore'] });
+    } catch {
+      try {
+        execSync('xclip -selection clipboard', { input: clean, stdio: ['pipe', 'ignore', 'ignore'] });
+      } catch {
+        // Neither available — OSC 52 is the primary method
+      }
+    }
+
+    const label = activeTab === 0 ? 'all' : sessionOrder[activeTab - 1];
+    showStatus(`${green(symbols.tick)} Copied ${lines.length} lines from [${label}]`);
+  }
+
   /** Handle keypress */
   function onKey(key: Buffer): void {
     const seq = key.toString();
-    const totalTabs = sessionOrder.length + 1; // +1 for "All"
+    const totalTabs = sessionOrder.length + 1;
 
     // Ctrl+C
     if (seq === '\x03') {
@@ -286,13 +333,9 @@ export async function show(opts: ShowOptions): Promise<void> {
       return;
     }
 
-    // Number keys 0-9 for quick tab switch
-    if (seq >= '0' && seq <= '9') {
-      const idx = parseInt(seq, 10);
-      if (idx < totalTabs) {
-        activeTab = idx;
-        render();
-      }
+    // c = copy visible logs
+    if (seq === 'c' || seq === 'C') {
+      copyToClipboard();
       return;
     }
   }
