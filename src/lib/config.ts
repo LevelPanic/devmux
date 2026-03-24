@@ -33,8 +33,6 @@ export interface DevmuxConfig {
   env: Record<string, string>;
   /** Command to run after creating a worktree */
   postCreate: string;
-  /** Next.js distDir env var name */
-  distDirEnv: string;
   /** Remembered port assignments per branch */
   ports: PortMapping[];
   /** Named services for monorepos — each can be started individually */
@@ -194,7 +192,6 @@ function detectConfig(projectRoot: string): DevmuxConfig {
     worktreeDir: '../devmux-worktrees',
     env: {},
     postCreate: `${pm} install`,
-    distDirEnv: 'NEXT_DIST_DIR',
     ports: [],
     services,
     envFiles,

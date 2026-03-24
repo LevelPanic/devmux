@@ -10,7 +10,7 @@ const program = new Command();
 
 program
   .name('devmux')
-  .description('Run multiple Next.js dev sessions across git worktrees')
+  .description('Run multiple dev sessions across git worktrees')
   .version(pkg.version);
 
 program

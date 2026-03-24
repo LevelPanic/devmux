@@ -51,7 +51,7 @@ src/
 
 - **Zero unnecessary dependencies.** The package has 2 runtime deps (`commander`, `tree-kill`). Think hard before adding another. If Node has a built-in, use it.
 - **Cross-platform.** Must work on macOS, Linux, and Windows. No shell-specific commands (`tail`, `grep`, etc.) — use Node APIs.
-- **Security-conscious.** Never interpolate user input into shell commands. Use `execFileSync` with array args. Validate all inputs that touch the filesystem or git.
+- **Security-conscious.** Use `execFileSync` with array args for git and system commands. Validate all inputs that touch the filesystem or git. The one exception is `spawn(command, { shell: true })` in `process-manager.ts` — dev server commands need shell parsing (e.g., `pnpm run dev`), but these come from the user's own config, not untrusted input.
 - **Accessible output.** Respect `NO_COLOR`, check `isTTY`, provide ASCII fallback symbols.
 
 ## Making Changes

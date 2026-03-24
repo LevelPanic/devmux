@@ -1,6 +1,5 @@
 import { writeFileSync, unlinkSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { registryPath } from './paths.js';
 
 const LOCK_STALE_MS = 10000;
@@ -23,9 +22,9 @@ function isLockStale(lock: LockContent): boolean {
   return Date.now() - lock.timestamp > LOCK_STALE_MS;
 }
 
-/** Cross-platform synchronous sleep (no busy-wait) */
+/** Synchronous sleep without busy-wait or subprocess */
 function sleepMs(ms: number): void {
-  spawnSync('node', ['-e', `setTimeout(()=>{},${ms})`], { stdio: 'ignore' });
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 /**

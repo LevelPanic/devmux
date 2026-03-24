@@ -13,14 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `devmux restart <session>` — stop and restart a session, preserving branch, directory, and env
 - `devmux attach <session>` — attach to a running session's live output with real-time streaming and process health monitoring
 - Env swapping on restart — `restart -e KEY=VAL` merges new env vars, `--clear-env` wipes and replaces. Shows a diff of changed values.
-- Health check / readiness polling after `devmux up` and `devmux restart` — waits up to 30s for the server to accept connections, shows elapsed time
+- Health check / readiness polling after `devmux up` and `devmux restart` — waits up to 30s for the server to accept connections
 - `.gitignore` warning — `devmux init` and `devmux up` warn if `.devmux.json` is not in `.gitignore`
 - Registry file locking — concurrent `devmux up` commands no longer clobber each other's registry entries
 - Monorepo services — auto-detects apps in `apps/` and `packages/` with dev scripts, each runnable individually via `--service`
 - Env file symlinking — auto-detects `.env` files and symlinks them from main repo into new worktrees via `envFiles` config
-- `devmux init` shows detected env files and warns if none found
+
+### Security
+
+- `portKey` field on sessions prevents service port mappings from leaking across branches
+- Dashboard stop button uses `JSON.stringify` for JS-context escaping
+- Clipboard copy uses `execFileSync` with array args
 
 ## [0.1.0] - 2026-03-24
+
+Initial release.
 
 ### Added
 
@@ -34,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-detection of package manager (pnpm, npm, yarn, bun)
 - Auto-detection of dev command from `package.json` scripts
 - Port memory — remembers which port was used for which branch
-- Same-worktree mode (`-s`) with separate `.next` build directories
+- Same-worktree mode (`-s`) with separate build directories
 - `NO_COLOR` and TTY detection for accessible terminal output
 - Cross-platform log tailing (no `tail` dependency)
 
@@ -46,3 +53,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dashboard bound to `127.0.0.1` (localhost only)
 - Path traversal protection on logs API endpoint
 - Atomic registry writes to prevent file corruption
+
+[0.2.0]: https://github.com/LevelPanic/devmux/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/LevelPanic/devmux/releases/tag/v0.1.0

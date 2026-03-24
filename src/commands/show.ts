@@ -1,7 +1,7 @@
 import { watch } from 'node:fs/promises';
 import { open } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { getSessionsByProject, getSessions, isProcessAlive, type Session } from '../lib/registry.js';
 import { findProjectRoot } from '../lib/config.js';
 import { logFilePath } from '../lib/paths.js';
@@ -388,10 +388,10 @@ export async function show(opts: ShowOptions): Promise<void> {
 
     // pbcopy / xclip fallback
     try {
-      execSync('pbcopy', { input: clean, stdio: ['pipe', 'ignore', 'ignore'] });
+      execFileSync('pbcopy', [], { input: clean, stdio: ['pipe', 'ignore', 'ignore'] });
     } catch {
       try {
-        execSync('xclip -selection clipboard', { input: clean, stdio: ['pipe', 'ignore', 'ignore'] });
+        execFileSync('xclip', ['-selection', 'clipboard'], { input: clean, stdio: ['pipe', 'ignore', 'ignore'] });
       } catch {
         // OSC 52 only
       }

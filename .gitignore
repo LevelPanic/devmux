@@ -17,5 +17,12 @@ Thumbs.db
 *.swp
 *.swo
 
+# AI tools
+.claude/
+.cursor/
+
 # npm
 *.tgz
+
+# Env
+.env*

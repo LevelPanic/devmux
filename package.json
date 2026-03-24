@@ -1,10 +1,13 @@
 {
   "name": "devmux",
   "version": "0.2.0",
-  "description": "Run multiple Next.js dev sessions across git worktrees",
+  "description": "Run multiple dev sessions across git worktrees — zero config, auto-detects everything",
   "type": "module",
   "bin": {
     "devmux": "./bin/devmux.js"
+  },
+  "exports": {
+    ".": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
@@ -13,22 +16,27 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.js.map",
     "bin",
     "LICENSE",
     "README.md",
     "CHANGELOG.md"
   ],
   "keywords": [
-    "nextjs",
-    "next",
     "dev",
+    "devserver",
     "worktree",
     "git-worktree",
     "multiplexer",
     "parallel",
     "development",
-    "devserver",
-    "cli"
+    "cli",
+    "monorepo",
+    "process-manager",
+    "terminal",
+    "nextjs",
+    "vite",
+    "remix"
   ],
   "repository": {
     "type": "git",
