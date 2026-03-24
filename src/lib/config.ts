@@ -39,6 +39,8 @@ export interface DevmuxConfig {
   ports: PortMapping[];
   /** Named services for monorepos — each can be started individually */
   services: Record<string, ServiceConfig>;
+  /** Files to symlink from main repo into new worktrees (e.g., .env files) */
+  envFiles: string[];
 }
 
 export function findProjectRoot(from: string = process.cwd()): string {
@@ -126,11 +128,55 @@ function detectServices(projectRoot: string, pm: string): Record<string, Service
   return services;
 }
 
+/** Auto-detect .env files throughout the project */
+function detectEnvFiles(projectRoot: string): string[] {
+  const envFiles: string[] = [];
+  const envPatterns = ['.env', '.env.local', '.env.development', '.env.development.local'];
+
+  // Check root
+  for (const pattern of envPatterns) {
+    if (existsSync(join(projectRoot, pattern))) {
+      envFiles.push(pattern);
+    }
+  }
+
+  // Check app directories
+  const appDirs = ['apps', 'packages'];
+  for (const appDir of appDirs) {
+    const appsPath = join(projectRoot, appDir);
+    if (!existsSync(appsPath)) continue;
+
+    try {
+      const entries = readdirSync(appsPath);
+      for (const entry of entries) {
+        try {
+          const entryPath = join(appsPath, entry);
+          if (!statSync(entryPath).isDirectory()) continue;
+
+          for (const pattern of envPatterns) {
+            const envPath = join(appDir, entry, pattern);
+            if (existsSync(join(projectRoot, envPath))) {
+              envFiles.push(envPath);
+            }
+          }
+        } catch {
+          // Skip broken entries
+        }
+      }
+    } catch {
+      // Skip unreadable dirs
+    }
+  }
+
+  return envFiles;
+}
+
 /** Build config from repo detection */
 function detectConfig(projectRoot: string): DevmuxConfig {
   const pm = detectPackageManager(projectRoot);
   const command = detectDevCommand(projectRoot, pm);
   const services = detectServices(projectRoot, pm);
+  const envFiles = detectEnvFiles(projectRoot);
 
   let projectName: string;
   try {
@@ -151,6 +197,7 @@ function detectConfig(projectRoot: string): DevmuxConfig {
     distDirEnv: 'NEXT_DIST_DIR',
     ports: [],
     services,
+    envFiles,
   };
 }
 
@@ -178,7 +225,13 @@ export function loadConfig(projectRoot?: string): DevmuxConfig {
   try {
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
     const detected = detectConfig(root);
-    return { ...detected, ...raw, ports: raw.ports || [], services: { ...detected.services, ...(raw.services || {}) } };
+    return {
+      ...detected,
+      ...raw,
+      ports: raw.ports || [],
+      services: { ...detected.services, ...(raw.services || {}) },
+      envFiles: raw.envFiles || detected.envFiles,
+    };
   } catch (e) {
     // Don't silently overwrite — warn and use detected defaults in-memory only
     console.error(`Warning: .devmux.json has invalid JSON, using auto-detected config`);

@@ -1,6 +1,6 @@
 import { execFileSync, ExecFileSyncOptions } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve, basename } from 'node:path';
+import { existsSync, readFileSync, symlinkSync, mkdirSync } from 'node:fs';
+import { resolve, basename, dirname, join } from 'node:path';
 import { resolveWorktreeBase, type DevmuxConfig } from './config.js';
 
 /** Safe exec — uses execFileSync to avoid shell injection */
@@ -110,7 +110,47 @@ export function ensureWorktree(
     git(['worktree', 'add', '-b', branch, worktreeDir], { cwd: projectRoot });
   }
 
+  // Symlink env files from main repo
+  if (config.envFiles && config.envFiles.length > 0) {
+    symlinkEnvFiles(projectRoot, worktreeDir, config.envFiles);
+  }
+
   return { path: worktreeDir, branch, isNew: true };
+}
+
+/** Symlink env files from the main repo into a worktree */
+export function symlinkEnvFiles(projectRoot: string, worktreeDir: string, envFiles: string[]): { linked: string[]; missing: string[] } {
+  const linked: string[] = [];
+  const missing: string[] = [];
+
+  for (const relPath of envFiles) {
+    const source = resolve(projectRoot, relPath);
+    const target = resolve(worktreeDir, relPath);
+
+    if (!existsSync(source)) {
+      missing.push(relPath);
+      continue;
+    }
+
+    // Don't overwrite if file already exists in worktree
+    if (existsSync(target)) continue;
+
+    // Ensure target directory exists
+    const targetDir = dirname(target);
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+
+    try {
+      symlinkSync(source, target);
+      linked.push(relPath);
+    } catch {
+      // Symlink failed (e.g., Windows without dev mode) — skip
+      missing.push(relPath);
+    }
+  }
+
+  return { linked, missing };
 }
 
 /** Remove a worktree */

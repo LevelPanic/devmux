@@ -34,6 +34,11 @@ export function init(): void {
   console.log(`    Package manager: ${cyan(config.packageManager)}`);
   console.log(`    Dev command:     ${cyan(config.command)}`);
   console.log(`    Post-create:     ${cyan(config.postCreate)}`);
+  if (config.envFiles.length > 0) {
+    console.log(`    Env files:       ${cyan(String(config.envFiles.length))} detected ${dim(`(${config.envFiles.slice(0, 3).join(', ')}${config.envFiles.length > 3 ? ', ...' : ''})`)}`);
+  } else {
+    console.log(`    Env files:       ${yellow('none detected')} ${dim('— add "envFiles" to .devmux.json')}`);
+  }
 
   // Warn about .gitignore
   if (!isInGitignore(projectRoot)) {

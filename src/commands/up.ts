@@ -116,6 +116,23 @@ export async function up(branchOrName: string | undefined, opts: UpOptions): Pro
 
     if (wt.isNew) {
       console.log(`${green(symbols.tick)} Created worktree at ${dim(wt.path)}`);
+
+      // Report env file symlinks
+      if (config.envFiles && config.envFiles.length > 0) {
+        // Already symlinked by ensureWorktree — just report
+        const linked = config.envFiles.filter((f) => existsSync(resolve(wt.path, f)));
+        const missing = config.envFiles.filter((f) => !existsSync(resolve(projectRoot, f)));
+        if (linked.length > 0) {
+          console.log(`${green(symbols.tick)} Symlinked ${bold(String(linked.length))} env file(s)`);
+        }
+        if (missing.length > 0) {
+          console.log(`${yellow(symbols.warning)} Missing env files: ${missing.map((f) => dim(f)).join(', ')}`);
+        }
+      } else {
+        console.log(`${yellow(symbols.warning)} No envFiles configured — worktree won't have .env files`);
+        console.log(`  ${dim('Add "envFiles" to .devmux.json or run: devmux init')}`);
+      }
+
       if (config.postCreate) {
         console.log(`${dim(symbols.arrow)} Running: ${config.postCreate}`);
         try {
