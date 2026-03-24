@@ -1,0 +1,39 @@
+{
+  "name": "devmux",
+  "version": "0.1.0",
+  "description": "Run multiple Next.js dev sessions across git worktrees",
+  "type": "module",
+  "bin": {
+    "devmux": "./bin/devmux.js"
+  },
+  "main": "./dist/cli.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "tsc"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "keywords": [
+    "nextjs",
+    "dev",
+    "worktree",
+    "multiplexer",
+    "parallel",
+    "development"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "tree-kill": "^1.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}

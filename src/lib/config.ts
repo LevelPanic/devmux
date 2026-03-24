@@ -1,0 +1,159 @@
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { join, resolve, basename } from 'node:path';
+import { configFileName } from './paths.js';
+
+export interface PortMapping {
+  branch: string;
+  port: number;
+}
+
+export interface DevmuxConfig {
+  /** Auto-detected project name */
+  name: string;
+  /** Command to start the dev server */
+  command: string;
+  /** Detected package manager */
+  packageManager: 'pnpm' | 'npm' | 'yarn' | 'bun';
+  /** Port range [min, max] for auto-assignment */
+  portRange: [number, number];
+  /** Directory for worktrees, relative to project root */
+  worktreeDir: string;
+  /** Extra environment variables to pass to all sessions */
+  env: Record<string, string>;
+  /** Command to run after creating a worktree */
+  postCreate: string;
+  /** Next.js distDir env var name */
+  distDirEnv: string;
+  /** Remembered port assignments per branch */
+  ports: PortMapping[];
+}
+
+export function findProjectRoot(from: string = process.cwd()): string {
+  let dir = resolve(from);
+  while (dir !== '/') {
+    if (
+      existsSync(join(dir, 'package.json')) &&
+      (existsSync(join(dir, '.git')) || existsSync(join(dir, configFileName())))
+    ) {
+      return dir;
+    }
+    dir = resolve(dir, '..');
+  }
+  return process.cwd();
+}
+
+/** Detect package manager from lockfiles */
+function detectPackageManager(projectRoot: string): 'pnpm' | 'npm' | 'yarn' | 'bun' {
+  if (existsSync(join(projectRoot, 'pnpm-lock.yaml')) || existsSync(join(projectRoot, 'pnpm-workspace.yaml'))) return 'pnpm';
+  if (existsSync(join(projectRoot, 'bun.lockb')) || existsSync(join(projectRoot, 'bun.lock'))) return 'bun';
+  if (existsSync(join(projectRoot, 'yarn.lock'))) return 'yarn';
+  return 'npm';
+}
+
+/** Detect the best dev command from package.json scripts */
+function detectDevCommand(projectRoot: string, pm: string): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf-8'));
+    const scripts = pkg.scripts || {};
+
+    // Prefer specific dev commands in order of likelihood
+    const candidates = ['dev:web', 'dev:app', 'dev:next', 'dev', 'start:dev', 'start'];
+    for (const name of candidates) {
+      if (scripts[name]) {
+        return `${pm} run ${name}`;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return `${pm} run dev`;
+}
+
+/** Detect if this is a monorepo */
+function isMonorepo(projectRoot: string): boolean {
+  return (
+    existsSync(join(projectRoot, 'pnpm-workspace.yaml')) ||
+    existsSync(join(projectRoot, 'lerna.json')) ||
+    existsSync(join(projectRoot, 'turbo.json'))
+  );
+}
+
+/** Build config from repo detection */
+function detectConfig(projectRoot: string): DevmuxConfig {
+  const pm = detectPackageManager(projectRoot);
+  const command = detectDevCommand(projectRoot, pm);
+
+  let projectName: string;
+  try {
+    const pkg = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf-8'));
+    projectName = pkg.name || basename(projectRoot);
+  } catch {
+    projectName = basename(projectRoot);
+  }
+
+  return {
+    name: projectName,
+    command,
+    packageManager: pm,
+    portRange: [3000, 3099],
+    worktreeDir: '../devmux-worktrees',
+    env: {},
+    postCreate: `${pm} install`,
+    distDirEnv: 'NEXT_DIST_DIR',
+    ports: [],
+  };
+}
+
+/** Load config — auto-creates from repo detection if no config file exists */
+export function loadConfig(projectRoot?: string): DevmuxConfig {
+  const root = projectRoot || findProjectRoot();
+  const configPath = join(root, configFileName());
+
+  if (!existsSync(configPath)) {
+    // Auto-detect and save
+    const config = detectConfig(root);
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    return config;
+  }
+
+  try {
+    const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
+    // Merge with detected defaults so new fields get populated
+    const detected = detectConfig(root);
+    return { ...detected, ...raw, ports: raw.ports || [] };
+  } catch {
+    const config = detectConfig(root);
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    return config;
+  }
+}
+
+/** Save config back to disk */
+export function saveConfig(config: DevmuxConfig, projectRoot?: string): void {
+  const root = projectRoot || findProjectRoot();
+  const configPath = join(root, configFileName());
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+}
+
+/** Get remembered port for a branch, or undefined */
+export function getPortForBranch(config: DevmuxConfig, branch: string): number | undefined {
+  const mapping = config.ports.find((p) => p.branch === branch);
+  return mapping?.port;
+}
+
+/** Remember a port assignment for a branch */
+export function rememberPort(config: DevmuxConfig, branch: string, port: number, projectRoot?: string): void {
+  config.ports = config.ports.filter((p) => p.branch !== branch);
+  config.ports.push({ branch, port });
+  saveConfig(config, projectRoot);
+}
+
+/** Forget a port assignment */
+export function forgetPort(config: DevmuxConfig, branch: string, projectRoot?: string): void {
+  config.ports = config.ports.filter((p) => p.branch !== branch);
+  saveConfig(config, projectRoot);
+}
+
+export function resolveWorktreeBase(projectRoot: string, config: DevmuxConfig): string {
+  return resolve(projectRoot, config.worktreeDir);
+}
