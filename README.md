@@ -76,6 +76,7 @@ devmux up -s                      # Same worktree, separate .next dir
 devmux up -n my-session           # Custom session name
 devmux up -c "pnpm dev:api"      # Override the dev command
 devmux up -e DEBUG=true           # Extra env vars
+devmux up --service web           # Start a specific monorepo service
 ```
 
 | Flag | Description |
@@ -84,7 +85,28 @@ devmux up -e DEBUG=true           # Extra env vars
 | `-c, --command <cmd>` | Override the dev command |
 | `-s, --same-worktree` | Don't create a worktree; use current dir with a separate build cache |
 | `-n, --name <name>` | Custom session name (default: branch name) |
+| `--service <name>` | Run a specific service from the monorepo (see [Monorepo Services](#monorepo-services)) |
 | `-e, --env <K=V>` | Extra environment variables (repeatable) |
+
+After starting, devmux waits for the server to accept connections and shows a readiness indicator.
+
+### `devmux restart <session>`
+
+Stop and restart a session, preserving its branch, directory, and environment.
+
+```bash
+devmux restart feature-x             # Same port, same config
+devmux restart feature-x --port 3005 # Change port on restart
+devmux restart feature-x -c "new cmd" # Change command on restart
+```
+
+### `devmux attach <session>`
+
+Attach to a running session's live output. Shows recent logs on connect, then streams new output in real time. The session keeps running when you detach (Ctrl+C).
+
+```bash
+devmux attach feature-x    # Ctrl+C to detach (session stays running)
+```
 
 ### `devmux down [session]`
 
@@ -152,7 +174,8 @@ devmux auto-generates `.devmux.json` in your project root by detecting your repo
   "worktreeDir": "../devmux-worktrees",
   "env": {},
   "postCreate": "pnpm install",
-  "ports": []
+  "ports": [],
+  "services": {}
 }
 ```
 
@@ -166,8 +189,72 @@ devmux auto-generates `.devmux.json` in your project root by detecting your repo
 | `env` | Extra env vars for all sessions | Default `{}` |
 | `postCreate` | Runs in new worktrees | Uses detected package manager (`pnpm install`, `npm install`, etc.) |
 | `ports` | Remembered port-to-branch mappings | Managed automatically |
+| `services` | Named services for monorepos | Auto-detected from `apps/` and `packages/` directories |
 
 You can edit any field. The `ports` array is managed by devmux — when you assign a port to a branch, it's saved here so the next `devmux up` reuses it.
+
+## Monorepo Services
+
+In a monorepo, devmux auto-detects apps with dev scripts from `apps/` and `packages/` directories. Each becomes a named service you can start individually.
+
+For a monorepo like:
+```
+apps/
+  web/          ← has "dev" script
+  api/          ← has "dev" script
+  worker/       ← has "dev" script
+```
+
+devmux generates:
+```json
+{
+  "services": {
+    "web":    { "command": "pnpm run dev", "cwd": "apps/web" },
+    "api":    { "command": "pnpm run dev", "cwd": "apps/api" },
+    "worker": { "command": "pnpm run dev", "cwd": "apps/worker" }
+  }
+}
+```
+
+Then you can run them independently:
+
+```bash
+# Run the whole monorepo (default command)
+devmux up feature-x
+
+# Or run individual services on specific ports
+devmux up feature-x --service web --port 3000
+devmux up feature-x --service api --port 3001
+devmux up feature-x --service worker --port 3002
+
+# Each gets its own session (named branch:service)
+devmux ls
+# feature-x:web    ● running  :3000
+# feature-x:api    ● running  :3001
+# feature-x:worker ● running  :3002
+```
+
+You can customize services in `.devmux.json`:
+
+```json
+{
+  "services": {
+    "web": {
+      "command": "pnpm run dev",
+      "cwd": "apps/web",
+      "port": 3000,
+      "env": { "DEBUG": "true" }
+    }
+  }
+}
+```
+
+| Service field | Description |
+|---------------|-------------|
+| `command` | The dev command for this service |
+| `cwd` | Subdirectory relative to project root |
+| `port` | Default port (used before auto-assignment) |
+| `env` | Extra env vars for this service |
 
 ## Port Management
 

@@ -20,6 +20,7 @@ program
   .option('-c, --command <cmd>', 'Override the dev command')
   .option('-s, --same-worktree', 'Run in the current directory (no worktree, uses separate .next dir)')
   .option('-n, --name <name>', 'Custom session name (defaults to branch name)')
+  .option('--service <name>', 'Run a specific service from the services config (monorepo)')
   .option('-e, --env <KEY=VALUE...>', 'Extra environment variables', (v, prev: string[]) => [...prev, v], [])
   .action(async (branch, opts) => {
     const { up } = await import('./commands/up.js');
@@ -64,6 +65,24 @@ program
   .action(async (opts) => {
     const { dashboard } = await import('./commands/dashboard.js');
     dashboard(opts);
+  });
+
+program
+  .command('restart <session>')
+  .description('Stop and restart a session (preserves branch, dir, env)')
+  .option('-p, --port <port>', 'Change the port on restart')
+  .option('-c, --command <cmd>', 'Change the command on restart')
+  .action(async (session, opts) => {
+    const { restart } = await import('./commands/restart.js');
+    await restart(session, opts);
+  });
+
+program
+  .command('attach <session>')
+  .description('Attach to a running session\'s live output')
+  .action(async (session) => {
+    const { attach } = await import('./commands/attach.js');
+    await attach(session);
   });
 
 program

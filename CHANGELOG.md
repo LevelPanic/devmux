@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-24
+
+### Added
+
+- `devmux restart <session>` — stop and restart a session, preserving branch, directory, and env
+- `devmux attach <session>` — attach to a running session's live output with real-time streaming and process health monitoring
+- Health check / readiness polling after `devmux up` — waits up to 30s for the server to accept connections, shows elapsed time
+- `.gitignore` warning — `devmux init` and `devmux up` warn if `.devmux.json` is not in `.gitignore`
+- Registry file locking — concurrent `devmux up` commands no longer clobber each other's registry entries
+- Monorepo services — auto-detects apps in `apps/` and `packages/` with dev scripts, each runnable individually via `--service`
+
 ## [0.1.0] - 2026-03-24
 
 ### Added

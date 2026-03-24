@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
 import { registryPath, ensureDevmuxHome } from './paths.js';
 import { dirname, join } from 'node:path';
+import { acquireLock } from './lockfile.js';
 
 export interface Session {
   id: string;
@@ -35,7 +36,7 @@ export function loadRegistry(): Registry {
 }
 
 /** Atomic write — write to temp file then rename to avoid corruption */
-export function saveRegistry(registry: Registry): void {
+function saveRegistryUnsafe(registry: Registry): void {
   const p = registryPath();
   const dir = dirname(p);
   ensureDevmuxHome();
@@ -44,21 +45,45 @@ export function saveRegistry(registry: Registry): void {
   renameSync(tmp, p);
 }
 
+/** Save registry with file lock for concurrent write safety */
+export function saveRegistry(registry: Registry): void {
+  const release = acquireLock();
+  try {
+    saveRegistryUnsafe(registry);
+  } finally {
+    release();
+  }
+}
+
+/** Locked read-modify-write helper */
+function withRegistry<T>(fn: (reg: Registry) => T): T {
+  const release = acquireLock();
+  try {
+    const reg = loadRegistry();
+    const result = fn(reg);
+    saveRegistryUnsafe(reg);
+    return result;
+  } finally {
+    release();
+  }
+}
+
 export function addSession(session: Session): void {
-  const reg = loadRegistry();
-  reg.sessions = reg.sessions.filter((s) => s.id !== session.id);
-  reg.sessions.push(session);
-  saveRegistry(reg);
+  withRegistry((reg) => {
+    reg.sessions = reg.sessions.filter((s) => s.id !== session.id);
+    reg.sessions.push(session);
+  });
 }
 
 export function removeSession(id: string): Session | undefined {
-  const reg = loadRegistry();
-  const session = reg.sessions.find((s) => s.id === id);
-  if (session) {
-    reg.sessions = reg.sessions.filter((s) => s.id !== id);
-    saveRegistry(reg);
-  }
-  return session;
+  let found: Session | undefined;
+  withRegistry((reg) => {
+    found = reg.sessions.find((s) => s.id === id);
+    if (found) {
+      reg.sessions = reg.sessions.filter((s) => s.id !== id);
+    }
+  });
+  return found;
 }
 
 export function getSession(id: string): Session | undefined {
@@ -84,22 +109,17 @@ export function isProcessAlive(pid: number): boolean {
 
 /** Remove dead sessions from registry and return them */
 export function pruneDeadSessions(): Session[] {
-  const reg = loadRegistry();
   const dead: Session[] = [];
-  const alive: Session[] = [];
-
-  for (const session of reg.sessions) {
-    if (isProcessAlive(session.pid)) {
-      alive.push(session);
-    } else {
-      dead.push(session);
+  withRegistry((reg) => {
+    const alive: Session[] = [];
+    for (const session of reg.sessions) {
+      if (isProcessAlive(session.pid)) {
+        alive.push(session);
+      } else {
+        dead.push(session);
+      }
     }
-  }
-
-  if (dead.length > 0) {
     reg.sessions = alive;
-    saveRegistry(reg);
-  }
-
+  });
   return dead;
 }

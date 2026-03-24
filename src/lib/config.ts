@@ -1,10 +1,21 @@
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, basename, parse as parsePath } from 'node:path';
 import { configFileName } from './paths.js';
 
 export interface PortMapping {
   branch: string;
   port: number;
+}
+
+export interface ServiceConfig {
+  /** Command to start this service */
+  command: string;
+  /** Subdirectory relative to project root (e.g., "apps/Admanage") */
+  cwd?: string;
+  /** Default port for this service */
+  port?: number;
+  /** Extra env vars for this service */
+  env?: Record<string, string>;
 }
 
 export interface DevmuxConfig {
@@ -26,6 +37,8 @@ export interface DevmuxConfig {
   distDirEnv: string;
   /** Remembered port assignments per branch */
   ports: PortMapping[];
+  /** Named services for monorepos — each can be started individually */
+  services: Record<string, ServiceConfig>;
 }
 
 /** Cross-platform root detection (handles `/` on Unix and `C:\` on Windows) */
@@ -76,10 +89,55 @@ function detectDevCommand(projectRoot: string, pm: string): string {
   return `${pm} run dev`;
 }
 
+/** Auto-detect monorepo workspace apps that have dev scripts */
+function detectServices(projectRoot: string, pm: string): Record<string, ServiceConfig> {
+  const services: Record<string, ServiceConfig> = {};
+
+  // Check common monorepo app directories
+  const appDirs = ['apps', 'packages'];
+  for (const appDir of appDirs) {
+    const appsPath = join(projectRoot, appDir);
+    if (!existsSync(appsPath)) continue;
+
+    try {
+      const entries = readdirSync(appsPath);
+
+      for (const entry of entries) {
+        const entryPath = join(appsPath, entry);
+        const pkgPath = join(entryPath, 'package.json');
+
+        if (!statSync(entryPath).isDirectory() || !existsSync(pkgPath)) continue;
+
+        try {
+          const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+          const scripts = pkg.scripts || {};
+
+          // Look for a dev script
+          const devScript = ['dev', 'dev:web', 'start:dev', 'start'].find((s) => scripts[s]);
+          if (devScript) {
+            const name = pkg.name?.replace(/^@[^/]+\//, '') || entry;
+            services[name] = {
+              command: `${pm} run ${devScript}`,
+              cwd: `${appDir}/${entry}`,
+            };
+          }
+        } catch {
+          // Skip unreadable packages
+        }
+      }
+    } catch {
+      // Skip unreadable directories
+    }
+  }
+
+  return services;
+}
+
 /** Build config from repo detection */
 function detectConfig(projectRoot: string): DevmuxConfig {
   const pm = detectPackageManager(projectRoot);
   const command = detectDevCommand(projectRoot, pm);
+  const services = detectServices(projectRoot, pm);
 
   let projectName: string;
   try {
@@ -99,7 +157,18 @@ function detectConfig(projectRoot: string): DevmuxConfig {
     postCreate: `${pm} install`,
     distDirEnv: 'NEXT_DIST_DIR',
     ports: [],
+    services,
   };
+}
+
+/** Get a service config by name */
+export function getService(config: DevmuxConfig, name: string): ServiceConfig | undefined {
+  return config.services?.[name];
+}
+
+/** List available service names */
+export function getServiceNames(config: DevmuxConfig): string[] {
+  return Object.keys(config.services || {});
 }
 
 /** Load config — auto-creates from repo detection if no config file exists */
@@ -116,7 +185,7 @@ export function loadConfig(projectRoot?: string): DevmuxConfig {
   try {
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
     const detected = detectConfig(root);
-    return { ...detected, ...raw, ports: raw.ports || [] };
+    return { ...detected, ...raw, ports: raw.ports || [], services: { ...detected.services, ...(raw.services || {}) } };
   } catch (e) {
     // Don't silently overwrite — warn and use detected defaults in-memory only
     console.error(`Warning: .devmux.json has invalid JSON, using auto-detected config`);
