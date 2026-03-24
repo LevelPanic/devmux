@@ -69,7 +69,7 @@ program
 
 program
   .command('show')
-  .description('Stream all session logs in one terminal (like pnpm/concurrently)')
+  .description('Interactive split-pane TUI — sidebar to select sessions, live log viewer')
   .option('-a, --all', 'Show sessions from all projects')
   .action(async (opts) => {
     const { show } = await import('./commands/show.js');

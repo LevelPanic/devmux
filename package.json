@@ -6,7 +6,6 @@
   "bin": {
     "devmux": "./bin/devmux.js"
   },
-  "main": "./dist/cli.js",
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",

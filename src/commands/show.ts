@@ -22,6 +22,45 @@ interface TrackedSession {
 }
 
 const MAX_LINES = 5000;
+const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07/g;
+
+/** Get visible length of a string (strips ANSI escape codes) */
+function visLen(s: string): number {
+  return s.replace(ANSI_RE, '').length;
+}
+
+/** Pad a string to a visible width, accounting for ANSI codes */
+function visPad(s: string, width: number): string {
+  const pad = width - visLen(s);
+  return pad > 0 ? s + ' '.repeat(pad) : s;
+}
+
+/** Truncate a string to a visible width, accounting for ANSI codes */
+function visTrunc(s: string, maxWidth: number): string {
+  const stripped = s.replace(ANSI_RE, '');
+  if (stripped.length <= maxWidth) return s;
+  // Walk through the string, tracking visible chars
+  let vis = 0;
+  let i = 0;
+  while (i < s.length && vis < maxWidth) {
+    if (s[i] === '\x1b') {
+      // Skip entire escape sequence
+      const match = s.slice(i).match(/^\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07/);
+      if (match) {
+        i += match[0].length;
+        continue;
+      }
+    }
+    vis++;
+    i++;
+  }
+  return s.slice(0, i) + '\x1b[0m'; // reset styles at truncation point
+}
+
+/** Strip all ANSI escape codes */
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, '');
+}
 
 const esc = {
   clear: '\x1b[2J\x1b[H',
@@ -44,7 +83,7 @@ export async function show(opts: ShowOptions): Promise<void> {
   const sessionOrder: string[] = [];
   let colorIndex = 0;
   let selectedIndex = 0;
-  let scrollOffset = 0; // how many lines scrolled up from bottom
+  let scrollOffset = 0;
   let statusMessage = '';
   let statusTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -89,7 +128,7 @@ export async function show(opts: ShowOptions): Promise<void> {
       ? ` ${selected.color(selected.session.id)} ${dim(`:${selected.session.port}`)}`
       : dim(' No session selected');
     process.stdout.write(esc.moveTo(1, 1));
-    process.stdout.write(taskHeader.padEnd(sw) + dim('│') + logHeader + esc.clearToEOL);
+    process.stdout.write(visPad(taskHeader, sw) + dim('│') + logHeader + esc.clearToEOL);
 
     // === Sidebar + Log pane ===
     for (let row = 0; row < contentRows; row++) {
@@ -107,10 +146,9 @@ export async function show(opts: ShowOptions): Promise<void> {
         let cell = ` ${status} ${marker} ${name}`;
 
         if (isSelected) {
-          // Highlight the row
-          cell = esc.inverse(cell.padEnd(sw));
+          cell = esc.inverse(visPad(cell, sw));
         } else {
-          cell = cell.padEnd(sw);
+          cell = visPad(cell, sw);
         }
         process.stdout.write(cell);
       } else {
@@ -127,8 +165,7 @@ export async function show(opts: ShowOptions): Promise<void> {
         const lineIdx = visibleStart + row;
         if (lineIdx >= 0 && lineIdx < totalLines) {
           const line = selected.lines[lineIdx];
-          // Truncate to fit
-          process.stdout.write(' ' + line.slice(0, logWidth - 1));
+          process.stdout.write(' ' + visTrunc(line, logWidth - 1));
         }
       }
 
@@ -180,7 +217,7 @@ export async function show(opts: ShowOptions): Promise<void> {
         const visibleStart = Math.max(0, totalLines - contentRows - scrollOffset);
         const lineIdx = visibleStart + row;
         if (lineIdx >= 0 && lineIdx < totalLines) {
-          process.stdout.write(' ' + selected.lines[lineIdx].slice(0, logWidth - 1));
+          process.stdout.write(' ' + visTrunc(selected.lines[lineIdx], logWidth - 1));
         }
       }
 
@@ -206,9 +243,9 @@ export async function show(opts: ShowOptions): Promise<void> {
 
       process.stdout.write(esc.moveTo(screenRow, 1));
       if (isSelected) {
-        process.stdout.write(esc.inverse(cell.padEnd(sw)));
+        process.stdout.write(esc.inverse(visPad(cell, sw)));
       } else {
-        process.stdout.write(cell.padEnd(sw));
+        process.stdout.write(visPad(cell, sw));
       }
     }
   }
@@ -342,7 +379,7 @@ export async function show(opts: ShowOptions): Promise<void> {
     if (!selected) return;
 
     const clean = selected.lines
-      .map((l) => l.replace(/\x1b\[[0-9;]*m/g, ''))
+      .map((l) => stripAnsi(l))
       .join('\n');
 
     // OSC 52
@@ -410,20 +447,31 @@ export async function show(opts: ShowOptions): Promise<void> {
     process.exit(0);
   }
 
+  // Require a TTY for the interactive TUI
+  if (!process.stdout.isTTY) {
+    console.error('devmux show requires an interactive terminal');
+    process.exit(1);
+  }
+
   // Enter alternate screen buffer — no scrollback, fixed canvas
   process.stdout.write(esc.enterAltScreen);
 
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    process.stdin.on('data', onKey);
-  }
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  process.stdin.on('data', onKey);
 
   refreshSessions();
   render();
 
   const registryPoll = setInterval(refreshSessions, 3000);
-  process.stdout.on('resize', render);
+
+  // Debounced resize handler
+  let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+  process.stdout.on('resize', () => {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(render, 80);
+  });
+
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
 
