@@ -32,6 +32,8 @@ const esc = {
   inverse: (s: string) => `\x1b[7m${s}\x1b[27m`,
   // Clear from cursor to end of line
   clearToEOL: '\x1b[K',
+  enterAltScreen: '\x1b[?1049h',
+  leaveAltScreen: '\x1b[?1049l',
 };
 
 export async function show(opts: ShowOptions): Promise<void> {
@@ -400,7 +402,7 @@ export async function show(opts: ShowOptions): Promise<void> {
     clearInterval(registryPoll);
     ac.abort();
     process.stdout.write(esc.showCursor);
-    process.stdout.write(esc.clear);
+    process.stdout.write(esc.leaveAltScreen);
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(false);
     }
@@ -408,7 +410,9 @@ export async function show(opts: ShowOptions): Promise<void> {
     process.exit(0);
   }
 
-  // Setup
+  // Enter alternate screen buffer — no scrollback, fixed canvas
+  process.stdout.write(esc.enterAltScreen);
+
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true);
     process.stdin.resume();
