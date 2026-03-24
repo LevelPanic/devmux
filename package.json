@@ -4,7 +4,7 @@
   "description": "Run multiple dev sessions across git worktrees — zero config, auto-detects everything",
   "type": "module",
   "bin": {
-    "devmux": "./bin/devmux.js"
+    "devmux": "bin/devmux.js"
   },
   "exports": {
     ".": "./dist/cli.js"
