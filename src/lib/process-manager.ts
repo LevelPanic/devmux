@@ -9,6 +9,7 @@ export interface SpawnOptions {
   branch: string;
   worktreeDir: string;
   port: number;
+  portKey: string;
   projectRoot: string;
   command: string;
   sameWorktree: boolean;
@@ -62,6 +63,7 @@ export function spawnSession(opts: SpawnOptions): Session {
     sameWorktree: opts.sameWorktree,
     startedAt: new Date().toISOString(),
     env: opts.env || {},
+    portKey: opts.portKey,
   };
 
   addSession(session);

@@ -170,7 +170,7 @@ function buildHTML(): string {
           </dl>
           <div class="actions">
             <button class="btn" onclick="window.open('http://localhost:'+\${Number(s.port)}, '_blank')">Open</button>
-            <button class="btn danger" onclick="stopSession('\${h(s.id)}')">Stop</button>
+            <button class="btn danger" onclick="stopSession(\${JSON.stringify(s.id)})">Stop</button>
           </div>
         </div>
       \`).join('');

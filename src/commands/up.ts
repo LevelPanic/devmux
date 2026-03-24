@@ -157,6 +157,7 @@ export async function up(branchOrName: string | undefined, opts: UpOptions): Pro
     branch,
     worktreeDir: serviceCwd,
     port,
+    portKey,
     projectRoot,
     command,
     sameWorktree,

@@ -12,12 +12,12 @@ interface CleanupOptions {
   force?: boolean;
 }
 
-function clearPorts(sessions: Array<{ branch: string }>): void {
+function clearPorts(sessions: Array<{ branch: string; portKey?: string }>): void {
   try {
     const projectRoot = findProjectRoot();
     const config = loadConfig(projectRoot);
     for (const s of sessions) {
-      forgetPort(config, s.branch, projectRoot);
+      forgetPort(config, s.portKey || s.branch, projectRoot);
     }
   } catch {
     // Not critical

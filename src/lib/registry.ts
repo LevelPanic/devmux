@@ -14,6 +14,8 @@ export interface Session {
   sameWorktree: boolean;
   startedAt: string;
   env: Record<string, string>;
+  /** Key used to store port in config.ports (branch or branch:service) */
+  portKey: string;
 }
 
 export interface Registry {

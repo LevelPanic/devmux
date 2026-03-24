@@ -1,4 +1,4 @@
-import { getSession, getSessions, getSessionsByProject, isProcessAlive } from '../lib/registry.js';
+import { getSession, getSessionsByProject, isProcessAlive, type Session } from '../lib/registry.js';
 import { killSession } from '../lib/process-manager.js';
 import { findProjectRoot, loadConfig, forgetPort } from '../lib/config.js';
 import { bold, green, yellow, red, dim, symbols } from '../lib/colors.js';
@@ -7,11 +7,15 @@ interface DownOptions {
   all?: boolean;
 }
 
-function clearPort(branch: string): void {
+/** Clear ports for a batch of sessions — loads config once */
+function clearPorts(sessions: Session[]): void {
+  if (sessions.length === 0) return;
   try {
     const projectRoot = findProjectRoot();
     const config = loadConfig(projectRoot);
-    forgetPort(config, branch, projectRoot);
+    for (const s of sessions) {
+      forgetPort(config, s.portKey || s.branch, projectRoot);
+    }
   } catch {
     // Config might not exist — not critical
   }
@@ -19,7 +23,6 @@ function clearPort(branch: string): void {
 
 export async function down(sessionId: string | undefined, opts: DownOptions): Promise<void> {
   if (opts.all) {
-    // Only stop sessions for the current project, not all projects
     const projectRoot = findProjectRoot();
     const sessions = getSessionsByProject(projectRoot);
     if (sessions.length === 0) {
@@ -28,13 +31,15 @@ export async function down(sessionId: string | undefined, opts: DownOptions): Pr
     }
 
     console.log(`Stopping ${bold(String(sessions.length))} session(s)...`);
+    const killed: Session[] = [];
     for (const session of sessions) {
-      const killed = await killSession(session.id);
-      if (killed) {
-        clearPort(killed.branch);
+      const k = await killSession(session.id);
+      if (k) {
+        killed.push(k);
         console.log(`  ${green(symbols.tick)} ${session.id} (port ${session.port})`);
       }
     }
+    clearPorts(killed);
     console.log(`\n${green(symbols.tick)} All sessions stopped, ports released`);
     return;
   }
@@ -58,6 +63,6 @@ export async function down(sessionId: string | undefined, opts: DownOptions): Pr
   }
 
   await killSession(sessionId);
-  clearPort(session.branch);
+  clearPorts([session]);
   console.log(`${green(symbols.tick)} Session ${bold(sessionId)} stopped, port ${session.port} released`);
 }

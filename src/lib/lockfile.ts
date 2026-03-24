@@ -1,8 +1,9 @@
 import { writeFileSync, unlinkSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { registryPath } from './paths.js';
 
-const LOCK_STALE_MS = 10000; // 10 seconds — if a lock is older than this, it's stale
+const LOCK_STALE_MS = 10000;
 
 function lockPath(): string {
   return registryPath() + '.lock';
@@ -14,14 +15,17 @@ interface LockContent {
 }
 
 function isLockStale(lock: LockContent): boolean {
-  // Check if the process that holds the lock is still alive
   try {
     process.kill(lock.pid, 0);
   } catch {
-    return true; // Process is dead — lock is stale
+    return true;
   }
-  // Check if lock is too old
   return Date.now() - lock.timestamp > LOCK_STALE_MS;
+}
+
+/** Cross-platform synchronous sleep (no busy-wait) */
+function sleepMs(ms: number): void {
+  spawnSync('node', ['-e', `setTimeout(()=>{},${ms})`], { stdio: 'ignore' });
 }
 
 /**
@@ -39,39 +43,34 @@ export function acquireLock(timeoutMs: number = 5000): () => void {
   const start = Date.now();
 
   while (true) {
-    // Try to detect and clean up stale locks
+    // Clean stale locks
     if (existsSync(lp)) {
       try {
         const content: LockContent = JSON.parse(readFileSync(lp, 'utf-8'));
         if (isLockStale(content)) {
-          // Stale lock — remove it
-          try { unlinkSync(lp); } catch { /* race with another process */ }
+          try { unlinkSync(lp); } catch { /* race */ }
         }
       } catch {
-        // Corrupted lock file — remove it
         try { unlinkSync(lp); } catch { /* race */ }
       }
     }
 
-    // Try to create lock file (atomic on most filesystems via O_EXCL)
+    // Try to create lock (O_EXCL = fail if exists)
     try {
       const content: LockContent = { pid: process.pid, timestamp: Date.now() };
-      writeFileSync(lp, JSON.stringify(content), { flag: 'wx' }); // wx = write exclusive (fail if exists)
-      // Lock acquired
+      writeFileSync(lp, JSON.stringify(content), { flag: 'wx' });
       return () => {
         try { unlinkSync(lp); } catch { /* already removed */ }
       };
     } catch {
-      // Lock exists and is held by another process
+      // Lock held by another process
     }
 
     if (Date.now() - start > timeoutMs) {
-      // Timeout — proceed without lock (better than deadlocking)
+      console.error('Warning: could not acquire registry lock, proceeding anyway');
       return () => {};
     }
 
-    // Spin wait — short sleep via busy loop (synchronous, no async needed)
-    const spinUntil = Date.now() + 50;
-    while (Date.now() < spinUntil) { /* spin */ }
+    sleepMs(50);
   }
 }

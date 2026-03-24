@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve, basename, parse as parsePath } from 'node:path';
+import { join, resolve, basename } from 'node:path';
 import { configFileName } from './paths.js';
 
 export interface PortMapping {
@@ -39,12 +39,6 @@ export interface DevmuxConfig {
   ports: PortMapping[];
   /** Named services for monorepos — each can be started individually */
   services: Record<string, ServiceConfig>;
-}
-
-/** Cross-platform root detection (handles `/` on Unix and `C:\` on Windows) */
-function isRootDir(dir: string): boolean {
-  const parsed = parsePath(dir);
-  return parsed.dir === dir || dir === parsed.root;
 }
 
 export function findProjectRoot(from: string = process.cwd()): string {
@@ -103,16 +97,15 @@ function detectServices(projectRoot: string, pm: string): Record<string, Service
       const entries = readdirSync(appsPath);
 
       for (const entry of entries) {
-        const entryPath = join(appsPath, entry);
-        const pkgPath = join(entryPath, 'package.json');
-
-        if (!statSync(entryPath).isDirectory() || !existsSync(pkgPath)) continue;
-
         try {
+          const entryPath = join(appsPath, entry);
+          const pkgPath = join(entryPath, 'package.json');
+
+          if (!statSync(entryPath).isDirectory() || !existsSync(pkgPath)) continue;
+
           const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
           const scripts = pkg.scripts || {};
 
-          // Look for a dev script
           const devScript = ['dev', 'dev:web', 'start:dev', 'start'].find((s) => scripts[s]);
           if (devScript) {
             const name = pkg.name?.replace(/^@[^/]+\//, '') || entry;
@@ -122,7 +115,7 @@ function detectServices(projectRoot: string, pm: string): Record<string, Service
             };
           }
         } catch {
-          // Skip unreadable packages
+          // Skip broken symlinks, unreadable packages, etc.
         }
       }
     } catch {

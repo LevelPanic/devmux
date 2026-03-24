@@ -42,6 +42,8 @@ export async function restart(sessionId: string, opts: RestartOptions): Promise<
   }
 
   // Resolve port
+  const projectRoot = findProjectRoot();
+  const config = loadConfig(projectRoot);
   let port: number;
   if (opts.port) {
     port = parseInt(opts.port, 10);
@@ -52,17 +54,14 @@ export async function restart(sessionId: string, opts: RestartOptions): Promise<
   } else if (await isPortAvailable(session.port)) {
     port = session.port;
   } else {
-    const projectRoot = findProjectRoot();
-    const config = loadConfig(projectRoot);
     port = await findAvailablePort(config.portRange);
     console.log(`${yellow(symbols.warning)} Port ${session.port} is busy, using ${cyan(String(port))}`);
   }
 
-  // Remember port
+  // Remember port using the correct key (branch or branch:service)
+  const portKey = session.portKey || session.branch;
   try {
-    const projectRoot = findProjectRoot();
-    const config = loadConfig(projectRoot);
-    rememberPort(config, session.branch, port, projectRoot);
+    rememberPort(config, portKey, port, projectRoot);
   } catch {
     // Non-critical
   }
@@ -102,6 +101,7 @@ export async function restart(sessionId: string, opts: RestartOptions): Promise<
     branch: session.branch,
     worktreeDir: session.worktreeDir,
     port,
+    portKey,
     projectRoot: session.projectRoot,
     command,
     sameWorktree: session.sameWorktree,

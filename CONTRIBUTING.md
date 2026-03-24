@@ -27,6 +27,8 @@ src/
 ├── commands/
 │   ├── up.ts              # Start a session
 │   ├── down.ts            # Stop a session
+│   ├── restart.ts         # Restart a session (with env swapping)
+│   ├── attach.ts          # Attach to live session output
 │   ├── list.ts            # List sessions
 │   ├── logs.ts            # Tail session logs
 │   ├── dashboard.ts       # Web dashboard
@@ -34,7 +36,9 @@ src/
 │   └── init.ts            # Generate config
 └── lib/
     ├── colors.ts          # ANSI color helpers (NO_COLOR aware)
-    ├── config.ts          # .devmux.json loading, auto-detection
+    ├── config.ts          # .devmux.json loading, auto-detection, services
+    ├── health.ts          # Port readiness polling
+    ├── lockfile.ts        # File-based locking for registry writes
     ├── paths.ts           # File path constants (~/.devmux/)
     ├── ports.ts           # Port availability checking
     ├── process-manager.ts # Spawn/kill background processes
