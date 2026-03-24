@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `devmux show` — interactive split-pane TUI with session sidebar and live log viewer (alternate screen buffer, arrow key navigation, copy to clipboard)
 - `devmux restart <session>` — stop and restart a session, preserving branch, directory, and env
 - `devmux attach <session>` — attach to a running session's live output with real-time streaming and process health monitoring
 - Env swapping on restart — `restart -e KEY=VAL` merges new env vars, `--clear-env` wipes and replaces. Shows a diff of changed values.

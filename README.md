@@ -30,7 +30,10 @@ devmux up fix-dashboard --port 3001
 # See what's running
 devmux ls
 
-# Open the web dashboard
+# Interactive TUI — view all session logs, switch with arrow keys
+devmux show
+
+# Or the web dashboard
 devmux dashboard
 
 # Stop a session
@@ -159,6 +162,33 @@ Web UI showing all sessions with live status, clickable port links, and stop but
 devmux dashboard           # http://localhost:4000
 devmux dashboard -p 4001   # Custom port
 ```
+
+### `devmux show`
+
+Interactive split-pane TUI — like pnpm's turbo mode. Left sidebar lists all sessions, right pane shows live logs from the selected one. Runs in the alternate screen buffer (fullscreen, no scrollback).
+
+```bash
+devmux show          # Sessions for current project
+devmux show --all    # Sessions across all projects
+```
+
+```
+ Tasks          │ web:3000
+ ● » web        │ ▲ Next.js 14.2.0
+ ● launcher     │ GET /api/dashboard 200 in 193ms
+ ● thumbnail-api│ GET /api/launch 200 in 24ms
+                │ POST /api/batch 201 in 64ms
+────────────────────────────────────────────────
+  ↑↓ Select   c Copy logs   Ctrl+C Exit
+```
+
+| Key | Action |
+|-----|--------|
+| `↑` `↓` | Select which session's logs to view |
+| `c` | Copy visible logs to clipboard |
+| `Ctrl+C` | Exit (sessions keep running) |
+
+Auto-discovers new sessions as they start and marks dead ones. Use a separate terminal for `devmux up`/`down`/`restart` while `show` is running.
 
 ### `devmux cleanup`
 

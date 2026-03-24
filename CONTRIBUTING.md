@@ -29,6 +29,7 @@ src/
 │   ├── down.ts            # Stop a session
 │   ├── restart.ts         # Restart a session (with env swapping)
 │   ├── attach.ts          # Attach to live session output
+│   ├── show.ts            # Interactive split-pane TUI log viewer
 │   ├── list.ts            # List sessions
 │   ├── logs.ts            # Tail session logs
 │   ├── dashboard.ts       # Web dashboard
