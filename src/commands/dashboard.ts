@@ -1,11 +1,21 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { getSessions, isProcessAlive, pruneDeadSessions } from '../lib/registry.js';
+import { getSessions, isProcessAlive, pruneDeadSessions, getSession } from '../lib/registry.js';
 import { logFilePath } from '../lib/paths.js';
 import { readFileSync, existsSync } from 'node:fs';
 import { bold, green, cyan, dim, symbols } from '../lib/colors.js';
 
 interface DashboardOptions {
   port?: string;
+}
+
+/** Escape HTML to prevent XSS */
+function esc(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function buildHTML(): string {
@@ -124,6 +134,8 @@ function buildHTML(): string {
   <div id="sessions" class="grid"></div>
 
   <script>
+    function h(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
     async function loadSessions() {
       const res = await fetch('/api/sessions');
       const sessions = await res.json();
@@ -138,7 +150,7 @@ function buildHTML(): string {
       el.innerHTML = sessions.map(s => \`
         <div class="card">
           <div class="card-header">
-            <span class="session-name">\${s.id}</span>
+            <span class="session-name">\${h(s.id)}</span>
             <span class="status \${s.alive ? 'running' : 'dead'}">
               <span class="status-dot"></span>
               \${s.alive ? 'running' : 'dead'}
@@ -146,19 +158,19 @@ function buildHTML(): string {
           </div>
           <dl class="meta">
             <dt>Port</dt>
-            <dd><a href="http://localhost:\${s.port}" target="_blank">:\${s.port}</a></dd>
+            <dd><a href="http://localhost:\${Number(s.port)}" target="_blank">:\${Number(s.port)}</a></dd>
             <dt>Branch</dt>
-            <dd>\${s.branch}</dd>
+            <dd>\${h(s.branch)}</dd>
             <dt>PID</dt>
-            <dd>\${s.pid}</dd>
+            <dd>\${Number(s.pid)}</dd>
             <dt>Dir</dt>
-            <dd title="\${s.worktreeDir}">\${s.worktreeDir.split('/').slice(-2).join('/')}</dd>
+            <dd title="\${h(s.worktreeDir)}">\${h(s.worktreeDir.split('/').slice(-2).join('/'))}</dd>
             <dt>Started</dt>
-            <dd>\${new Date(s.startedAt).toLocaleString()}</dd>
+            <dd>\${h(new Date(s.startedAt).toLocaleString())}</dd>
           </dl>
           <div class="actions">
-            <button class="btn" onclick="window.open('http://localhost:\${s.port}', '_blank')">Open</button>
-            <button class="btn danger" onclick="stopSession('\${s.id}')">Stop</button>
+            <button class="btn" onclick="window.open('http://localhost:'+\${Number(s.port)}, '_blank')">Open</button>
+            <button class="btn danger" onclick="stopSession('\${h(s.id)}')">Stop</button>
           </div>
         </div>
       \`).join('');
@@ -166,7 +178,7 @@ function buildHTML(): string {
 
     async function stopSession(id) {
       if (!confirm('Stop session ' + id + '?')) return;
-      await fetch('/api/sessions/' + id, { method: 'DELETE' });
+      await fetch('/api/sessions/' + encodeURIComponent(id), { method: 'DELETE' });
       loadSessions();
     }
 
@@ -177,8 +189,19 @@ function buildHTML(): string {
 </html>`;
 }
 
+function parseURL(req: IncomingMessage): URL | null {
+  try {
+    return new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  } catch {
+    return null;
+  }
+}
+
 function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
-  if (req.url === '/api/sessions' && req.method === 'GET') {
+  const url = parseURL(req);
+  if (!url) return false;
+
+  if (url.pathname === '/api/sessions' && req.method === 'GET') {
     pruneDeadSessions();
     const sessions = getSessions().map((s) => ({
       ...s,
@@ -189,30 +212,43 @@ function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
     return true;
   }
 
-  const stopMatch = req.url?.match(/^\/api\/sessions\/(.+)$/);
+  const stopMatch = url.pathname.match(/^\/api\/sessions\/(.+)$/);
   if (stopMatch && req.method === 'DELETE') {
     const id = decodeURIComponent(stopMatch[1]);
-    // Dynamic import to avoid circular
+    // Validate that session exists in registry before killing
+    const session = getSession(id);
+    if (!session) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Session not found' }));
+      return true;
+    }
+
     import('../lib/process-manager.js').then(({ killSession }) => {
-      killSession(id).then((session) => {
-        if (session) {
+      killSession(id)
+        .then((killed) => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ stopped: true, id }));
-        } else {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Session not found' }));
-        }
-      });
+        })
+        .catch(() => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Failed to stop session' }));
+        });
     });
     return true;
   }
 
-  if (req.url === '/api/logs' && req.method === 'GET') {
-    const url = new URL(req.url, `http://${req.headers.host}`);
+  if (url.pathname === '/api/logs' && req.method === 'GET') {
     const sessionId = url.searchParams.get('session');
     if (!sessionId) {
-      res.writeHead(400);
-      res.end('Missing session param');
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing session param' }));
+      return true;
+    }
+    // Validate session exists in registry to prevent path traversal
+    const session = getSession(sessionId);
+    if (!session) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Session not found' }));
       return true;
     }
     const logFile = logFilePath(sessionId);
@@ -222,7 +258,7 @@ function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       res.end(lines);
     } else {
-      res.writeHead(404);
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('No logs');
     }
     return true;
@@ -237,12 +273,12 @@ export function dashboard(opts: DashboardOptions): void {
   const server = createServer((req, res) => {
     if (handleAPI(req, res)) return;
 
-    // Serve dashboard HTML
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(buildHTML());
   });
 
-  server.listen(port, () => {
+  // Bind to localhost only — not exposed to the network
+  server.listen(port, '127.0.0.1', () => {
     console.log(`${green(symbols.tick)} Dashboard running at ${cyan(`http://localhost:${port}`)}`);
     console.log(`${dim('Press Ctrl+C to stop')}`);
   });

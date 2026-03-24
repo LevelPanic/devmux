@@ -1,10 +1,12 @@
-import { execSync, ExecSyncOptions } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { execFileSync, ExecFileSyncOptions } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { resolveWorktreeBase, type DevmuxConfig } from './config.js';
 
-const exec = (cmd: string, opts?: ExecSyncOptions): string =>
-  (execSync(cmd, { encoding: 'utf-8', stdio: 'pipe', ...opts }) as string).trim();
+/** Safe exec — uses execFileSync to avoid shell injection */
+function git(args: string[], opts?: ExecFileSyncOptions): string {
+  return (execFileSync('git', args, { encoding: 'utf-8', stdio: 'pipe', ...opts }) as string).trim();
+}
 
 export interface WorktreeInfo {
   path: string;
@@ -12,9 +14,26 @@ export interface WorktreeInfo {
   isNew: boolean;
 }
 
+/** Validate a branch name against git's own rules */
+function isValidBranchName(name: string): boolean {
+  if (!name || name === '.' || name === '..') return false;
+  // Reject shell metacharacters, control chars, spaces, tildes, colons, etc.
+  if (/[\x00-\x1f\x7f ~^:?*\[\\]/.test(name)) return false;
+  if (name.includes('..') || name.includes('@{') || name.endsWith('.lock')) return false;
+  if (name.startsWith('-') || name.startsWith('/') || name.endsWith('/') || name.endsWith('.')) return false;
+  return true;
+}
+
+/** Throws if branch name is unsafe */
+export function validateBranch(branch: string): void {
+  if (!isValidBranchName(branch)) {
+    throw new Error(`Invalid branch name: "${branch}"`);
+  }
+}
+
 /** List existing git worktrees */
 export function listWorktrees(projectRoot: string): Array<{ path: string; branch: string }> {
-  const raw = exec('git worktree list --porcelain', { cwd: projectRoot });
+  const raw = git(['worktree', 'list', '--porcelain'], { cwd: projectRoot });
   const worktrees: Array<{ path: string; branch: string }> = [];
   let current: { path?: string; branch?: string } = {};
 
@@ -30,7 +49,6 @@ export function listWorktrees(projectRoot: string): Array<{ path: string; branch
       current = {};
     }
   }
-  // Handle last entry (no trailing blank line)
   if (current.path && current.branch) {
     worktrees.push({ path: current.path, branch: current.branch });
   }
@@ -40,17 +58,18 @@ export function listWorktrees(projectRoot: string): Array<{ path: string; branch
 
 /** Get current branch name */
 export function getCurrentBranch(cwd: string = process.cwd()): string {
-  return exec('git rev-parse --abbrev-ref HEAD', { cwd });
+  return git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd });
 }
 
 /** Check if a branch exists locally or remotely */
 export function branchExists(branch: string, projectRoot: string): boolean {
+  validateBranch(branch);
   try {
-    exec(`git rev-parse --verify ${branch}`, { cwd: projectRoot });
+    git(['rev-parse', '--verify', branch], { cwd: projectRoot });
     return true;
   } catch {
     try {
-      exec(`git rev-parse --verify origin/${branch}`, { cwd: projectRoot });
+      git(['rev-parse', '--verify', `origin/${branch}`], { cwd: projectRoot });
       return true;
     } catch {
       return false;
@@ -64,6 +83,7 @@ export function ensureWorktree(
   projectRoot: string,
   config: DevmuxConfig,
 ): WorktreeInfo {
+  validateBranch(branch);
   const base = resolveWorktreeBase(projectRoot, config);
   const worktreeDir = resolve(base, branch.replace(/\//g, '-'));
 
@@ -77,19 +97,17 @@ export function ensureWorktree(
   // Check if directory already exists (stale worktree)
   if (existsSync(worktreeDir)) {
     try {
-      exec(`git worktree remove "${worktreeDir}" --force`, { cwd: projectRoot });
+      git(['worktree', 'remove', worktreeDir, '--force'], { cwd: projectRoot });
     } catch {
-      // Directory exists but isn't a worktree — user problem
       throw new Error(`Directory ${worktreeDir} already exists and is not a git worktree`);
     }
   }
 
   // Create the worktree
   if (branchExists(branch, projectRoot)) {
-    exec(`git worktree add "${worktreeDir}" "${branch}"`, { cwd: projectRoot });
+    git(['worktree', 'add', worktreeDir, branch], { cwd: projectRoot });
   } else {
-    // Create new branch from current HEAD
-    exec(`git worktree add -b "${branch}" "${worktreeDir}"`, { cwd: projectRoot });
+    git(['worktree', 'add', '-b', branch, worktreeDir], { cwd: projectRoot });
   }
 
   return { path: worktreeDir, branch, isNew: true };
@@ -98,7 +116,7 @@ export function ensureWorktree(
 /** Remove a worktree */
 export function removeWorktree(worktreeDir: string, projectRoot: string): void {
   try {
-    exec(`git worktree remove "${worktreeDir}" --force`, { cwd: projectRoot });
+    git(['worktree', 'remove', worktreeDir, '--force'], { cwd: projectRoot });
   } catch {
     // Already removed or not a worktree
   }
@@ -107,7 +125,7 @@ export function removeWorktree(worktreeDir: string, projectRoot: string): void {
 /** Get the project name from the root package.json or directory name */
 export function getProjectName(projectRoot: string): string {
   try {
-    const pkg = JSON.parse(exec(`cat package.json`, { cwd: projectRoot }));
+    const pkg = JSON.parse(readFileSync(resolve(projectRoot, 'package.json'), 'utf-8'));
     return pkg.name || basename(projectRoot);
   } catch {
     return basename(projectRoot);

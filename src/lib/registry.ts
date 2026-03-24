@@ -1,5 +1,6 @@
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { registryPath } from './paths.js';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
+import { registryPath, ensureDevmuxHome } from './paths.js';
+import { dirname, join } from 'node:path';
 
 export interface Session {
   id: string;
@@ -33,13 +34,18 @@ export function loadRegistry(): Registry {
   }
 }
 
+/** Atomic write — write to temp file then rename to avoid corruption */
 export function saveRegistry(registry: Registry): void {
-  writeFileSync(registryPath(), JSON.stringify(registry, null, 2) + '\n');
+  const p = registryPath();
+  const dir = dirname(p);
+  ensureDevmuxHome();
+  const tmp = join(dir, `.registry.${process.pid}.tmp`);
+  writeFileSync(tmp, JSON.stringify(registry, null, 2) + '\n');
+  renameSync(tmp, p);
 }
 
 export function addSession(session: Session): void {
   const reg = loadRegistry();
-  // Remove any existing session with same ID
   reg.sessions = reg.sessions.filter((s) => s.id !== session.id);
   reg.sessions.push(session);
   saveRegistry(reg);

@@ -1,5 +1,5 @@
 import { spawn, execSync } from 'node:child_process';
-import { openSync } from 'node:fs';
+import { openSync, closeSync } from 'node:fs';
 import { logFilePath } from './paths.js';
 import { addSession, removeSession, type Session } from './registry.js';
 import treeKill from 'tree-kill';
@@ -33,7 +33,6 @@ export function spawnSession(opts: SpawnOptions): Session {
     childEnv.NEXT_DIST_DIR = `.next-devmux-${opts.id}`;
   }
 
-  // Pass the full command string to shell — avoids escaping issues
   const child = spawn(opts.command, {
     cwd: opts.worktreeDir,
     env: childEnv,
@@ -44,12 +43,20 @@ export function spawnSession(opts: SpawnOptions): Session {
 
   child.unref();
 
+  // Close the fd in the parent — child has its own copy
+  closeSync(fd);
+
+  const pid = child.pid;
+  if (!pid) {
+    throw new Error(`Failed to spawn process for session "${opts.id}" — command: ${opts.command}`);
+  }
+
   const session: Session = {
     id: opts.id,
     branch: opts.branch,
     worktreeDir: opts.worktreeDir,
     port: opts.port,
-    pid: child.pid!,
+    pid,
     projectRoot: opts.projectRoot,
     command: opts.command,
     sameWorktree: opts.sameWorktree,
@@ -61,7 +68,7 @@ export function spawnSession(opts: SpawnOptions): Session {
   return session;
 }
 
-/** Kill a session's process tree */
+/** Kill a session's process tree with graceful shutdown */
 export function killSession(id: string): Promise<Session | undefined> {
   return new Promise((resolve) => {
     const session = removeSession(id);
@@ -70,17 +77,31 @@ export function killSession(id: string): Promise<Session | undefined> {
       return;
     }
 
+    // Send SIGTERM first
     treeKill(session.pid, 'SIGTERM', (err) => {
       if (err) {
-        // Process might already be dead
+        // Process might already be dead — that's fine
+        resolve(session);
+        return;
+      }
+
+      // Give 3 seconds for graceful shutdown, then SIGKILL
+      const timeout = setTimeout(() => {
+        treeKill(session.pid, 'SIGKILL', () => resolve(session));
+      }, 3000);
+
+      // Poll to see if process died
+      const poll = setInterval(() => {
         try {
-          treeKill(session.pid, 'SIGKILL', () => resolve(session));
+          process.kill(session.pid, 0);
+          // Still alive, keep waiting
         } catch {
+          // Dead — clean up and resolve
+          clearInterval(poll);
+          clearTimeout(timeout);
           resolve(session);
         }
-      } else {
-        resolve(session);
-      }
+      }, 200);
     });
   });
 }

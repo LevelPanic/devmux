@@ -53,7 +53,7 @@ program
   .option('--no-follow', 'Don\'t follow (just print and exit)')
   .action(async (session, opts) => {
     const { logs } = await import('./commands/logs.js');
-    logs(session, opts);
+    await logs(session, opts);
   });
 
 program

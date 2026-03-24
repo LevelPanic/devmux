@@ -1,4 +1,4 @@
-import { getSession, getSessions, isProcessAlive } from '../lib/registry.js';
+import { getSession, getSessions, getSessionsByProject, isProcessAlive } from '../lib/registry.js';
 import { killSession } from '../lib/process-manager.js';
 import { findProjectRoot, loadConfig, forgetPort } from '../lib/config.js';
 import { bold, green, yellow, red, dim, symbols } from '../lib/colors.js';
@@ -19,9 +19,11 @@ function clearPort(branch: string): void {
 
 export async function down(sessionId: string | undefined, opts: DownOptions): Promise<void> {
   if (opts.all) {
-    const sessions = getSessions();
+    // Only stop sessions for the current project, not all projects
+    const projectRoot = findProjectRoot();
+    const sessions = getSessionsByProject(projectRoot);
     if (sessions.length === 0) {
-      console.log(`${dim('No active sessions')}`);
+      console.log(`${dim('No active sessions for this project')}`);
       return;
     }
 

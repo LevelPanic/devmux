@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join, resolve, basename } from 'node:path';
+import { join, resolve, basename, parse as parsePath } from 'node:path';
 import { configFileName } from './paths.js';
 
 export interface PortMapping {
@@ -28,15 +28,23 @@ export interface DevmuxConfig {
   ports: PortMapping[];
 }
 
+/** Cross-platform root detection (handles `/` on Unix and `C:\` on Windows) */
+function isRootDir(dir: string): boolean {
+  const parsed = parsePath(dir);
+  return parsed.dir === dir || dir === parsed.root;
+}
+
 export function findProjectRoot(from: string = process.cwd()): string {
   let dir = resolve(from);
-  while (dir !== '/') {
+  let prev = '';
+  while (dir !== prev) {
     if (
       existsSync(join(dir, 'package.json')) &&
       (existsSync(join(dir, '.git')) || existsSync(join(dir, configFileName())))
     ) {
       return dir;
     }
+    prev = dir;
     dir = resolve(dir, '..');
   }
   return process.cwd();
@@ -56,7 +64,6 @@ function detectDevCommand(projectRoot: string, pm: string): string {
     const pkg = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf-8'));
     const scripts = pkg.scripts || {};
 
-    // Prefer specific dev commands in order of likelihood
     const candidates = ['dev:web', 'dev:app', 'dev:next', 'dev', 'start:dev', 'start'];
     for (const name of candidates) {
       if (scripts[name]) {
@@ -67,15 +74,6 @@ function detectDevCommand(projectRoot: string, pm: string): string {
     // ignore
   }
   return `${pm} run dev`;
-}
-
-/** Detect if this is a monorepo */
-function isMonorepo(projectRoot: string): boolean {
-  return (
-    existsSync(join(projectRoot, 'pnpm-workspace.yaml')) ||
-    existsSync(join(projectRoot, 'lerna.json')) ||
-    existsSync(join(projectRoot, 'turbo.json'))
-  );
 }
 
 /** Build config from repo detection */
@@ -110,7 +108,6 @@ export function loadConfig(projectRoot?: string): DevmuxConfig {
   const configPath = join(root, configFileName());
 
   if (!existsSync(configPath)) {
-    // Auto-detect and save
     const config = detectConfig(root);
     writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
     return config;
@@ -118,13 +115,13 @@ export function loadConfig(projectRoot?: string): DevmuxConfig {
 
   try {
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
-    // Merge with detected defaults so new fields get populated
     const detected = detectConfig(root);
     return { ...detected, ...raw, ports: raw.ports || [] };
-  } catch {
-    const config = detectConfig(root);
-    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-    return config;
+  } catch (e) {
+    // Don't silently overwrite — warn and use detected defaults in-memory only
+    console.error(`Warning: .devmux.json has invalid JSON, using auto-detected config`);
+    console.error(`  Fix the file or delete it to regenerate: ${configPath}`);
+    return detectConfig(root);
   }
 }
 
