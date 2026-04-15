@@ -166,12 +166,16 @@ devmux attach feature-x
 
 ### `devmux down [session]`
 
-Stop a session and release its port.
+Stop a session, release its port, and remove its git worktree.
 
 ```bash
-devmux down feature-x    # Stop one session
-devmux down --all         # Stop all sessions in this project
+devmux down feature-x              # Stop session and remove worktree
+devmux down --all                  # Stop all sessions in this project
+devmux down feature-x --keep-worktree   # Stop but leave worktree on disk
+devmux down feature-x --force-worktree  # Discard uncommitted changes
 ```
+
+Worktree removal is skipped for `--same-worktree` sessions (no worktree to remove). If the worktree has uncommitted or untracked changes, devmux keeps it and prints git's reason — commit/stash first, or pass `--force-worktree` to discard.
 
 ### `devmux ls`
 

@@ -153,13 +153,15 @@ export function symlinkEnvFiles(projectRoot: string, worktreeDir: string, envFil
   return { linked, missing };
 }
 
-/** Remove a worktree */
-export function removeWorktree(worktreeDir: string, projectRoot: string): void {
-  try {
-    git(['worktree', 'remove', worktreeDir, '--force'], { cwd: projectRoot });
-  } catch {
-    // Already removed or not a worktree
-  }
+/** Remove a worktree. Throws if git refuses (e.g. dirty worktree) unless force=true. */
+export function removeWorktree(
+  worktreeDir: string,
+  projectRoot: string,
+  opts: { force?: boolean } = {},
+): void {
+  const args = ['worktree', 'remove', worktreeDir];
+  if (opts.force) args.push('--force');
+  git(args, { cwd: projectRoot });
 }
 
 /** Get the project name from the root package.json or directory name */

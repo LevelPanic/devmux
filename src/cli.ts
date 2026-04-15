@@ -29,8 +29,10 @@ program
 
 program
   .command('down [session]')
-  .description('Stop a running session')
+  .description('Stop a running session and remove its git worktree')
   .option('-a, --all', 'Stop all sessions')
+  .option('--keep-worktree', 'Stop the session but leave the git worktree on disk')
+  .option('--force-worktree', 'Force-remove the worktree even with uncommitted changes')
   .action(async (session, opts) => {
     const { down } = await import('./commands/down.js');
     await down(session, opts);

@@ -43,8 +43,13 @@ export async function cleanup(opts: CleanupOptions): Promise<void> {
     for (const session of dead) {
       if (!session.sameWorktree && existsSync(session.worktreeDir)) {
         console.log(`${dim(symbols.arrow)} Removing worktree: ${session.worktreeDir}`);
-        removeWorktree(session.worktreeDir, session.projectRoot);
-        console.log(`  ${green(symbols.tick)} Done`);
+        try {
+          removeWorktree(session.worktreeDir, session.projectRoot, { force: true });
+          console.log(`  ${green(symbols.tick)} Done`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.log(`  ${yellow(symbols.warning)} Failed: ${msg.trim()}`);
+        }
       }
     }
   }
